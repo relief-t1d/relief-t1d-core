@@ -1,1 +1,7 @@
 ﻿.idea
+Train/test_results
+Train/plots
+Train/models
+Train/hist
+Train/20250520_104818_train_log.out
+*.out

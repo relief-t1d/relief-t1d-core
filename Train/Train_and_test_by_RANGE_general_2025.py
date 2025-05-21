@@ -1,4 +1,7 @@
+from typing import Tuple
 
+from pandas import DataFrame
+# ----------------------- Imports -----------------------
 from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
 import numpy as np
 import tensorflow as tf
@@ -8,7 +11,14 @@ import sys
 import pandas as pd
 import time
 import matplotlib.pyplot as plt
-import os
+import datetime
+
+import platform
+import socket
+import psutil
+import subprocess
+
+# ----------------------- End imports -----------------------
 
 # Set seeds for reproducibility
 np.random.seed(42)
@@ -20,18 +30,19 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 ###################### CONFIG EXPERIMENT #############################
 batch_size = 4096
 patience = 50
-max_epoch = 500
+max_epoch = 2
 
 # Path to the windows data
 windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/general/'
 
 history_length = 8  # 2h
 
-horizons = [2, 4, 6, 8, 12, 16]
-models = ['Linear', 'LSTM', 'CNN']
+horizons = [2, 4]
+algorithms = ['Linear', 'LSTM', 'CNN']
 
-# Prefix of the names
-# prefix_name =
+# Sensor reading limits
+maximum_sensor_reading = 500
+minimum_sensor_reading = 40
 
 repeated_examples = False
 
@@ -65,7 +76,8 @@ class Tee(object):
 
 
 # Open a log file to write the results
-log_file = open("script_log.out", "a", encoding="utf-8")
+time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+log_file = open(f"{time_str}_train_log.out", "a", encoding="utf-8")
 
 # Redirect stdout and stderr
 original_stdout = sys.stdout
@@ -73,8 +85,71 @@ original_stderr = sys.stderr
 sys.stdout = Tee(sys.stdout, log_file)
 sys.stderr = Tee(sys.stderr, log_file)
 
-try:
+# ----------------------- Print the system information -----------------------
 
+def log_experiment_info():
+    print("📅 Date & Time")
+    print("-----------------------------------")
+    print(f"Experiment Start : {datetime.datetime.now()}")
+
+    print("\n🖥️  System & Hardware")
+    print("-----------------------------------")
+    print(f"Hostname         : {socket.gethostname()}")
+    print(f"OS               : {platform.system()} {platform.release()} ({platform.version()})")
+    print(f"Architecture     : {platform.machine()}")
+    print(f"CPU              : {platform.processor()}")
+    print(f"CPU Cores        : {psutil.cpu_count(logical=False)} physical / {psutil.cpu_count()} logical")
+
+    ram = psutil.virtual_memory()
+    print(f"RAM Total        : {round(ram.total / (1024**3), 2)} GB")
+    print(f"RAM Available    : {round(ram.available / (1024**3), 2)} GB")
+    print(f"RAM Used         : {round(ram.used / (1024**3), 2)} GB")
+    print(f"RAM Usage (%)    : {ram.percent}%")
+
+    print("\n🐍 Python & Libraries")
+    print("-----------------------------------")
+    print(f"Python Version   : {platform.python_version()}")
+    print(f"Executable Path  : {sys.executable}")
+    print(f"TensorFlow       : {tf.__version__}")
+
+    print("\n🧠 GPU (via TensorFlow)")
+    print("-----------------------------------")
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        for i, gpu in enumerate(gpus):
+            print(f"GPU {i}           : {gpu.name}")
+    else:
+        print("No GPUs detected by TensorFlow.")
+
+    print("\n🎮 GPU Details (via nvidia-smi)")
+    print("-----------------------------------")
+    try:
+        result = subprocess.check_output([
+            "nvidia-smi",
+            "--query-gpu=name,memory.total,memory.used,utilization.gpu,driver_version",
+            "--format=csv,noheader"
+        ])
+        for i, line in enumerate(result.decode().strip().split('\n')):
+            name, mem_total, mem_used, usage, driver = map(str.strip, line.split(','))
+            print(f"GPU {i}           : {name}")
+            print(f"  Total Memory   : {mem_total}")
+            print(f"  Used Memory    : {mem_used}")
+            print(f"  Utilization    : {usage}")
+            print(f"  Driver Version : {driver}")
+    except FileNotFoundError:
+        print("⚠️  'nvidia-smi' not found or NVIDIA driver not installed.")
+    except Exception as e:
+        print(f"⚠️  Error running nvidia-smi: {e}")
+
+
+log_experiment_info()
+
+print("-----------------------------------")
+print()
+
+# ----------------------- End print the system information -----------------------
+
+try:
     def read_windows_no_duplicated(horizon):
         file_x_train = f"{windows_path}x_train_windows_horizon_{horizon}.npy"
         file_y_train = f"{windows_path}y_train_windows_horizon_{horizon}.npy"
@@ -311,7 +386,7 @@ try:
                          validation_data=validation_data,
                          epochs=max_epoch,
                          # shuffle=True,
-                         callbacks=callbacks(save_filepath + str(horizon),
+                         callbacks=callbacks(save_filepath,
                                              early_stopping_patience)
                          )
 
@@ -397,18 +472,45 @@ try:
             pred_values)), "Unequal number of values (reference : {0}) (prediction : {1}).".format(len(ref_values),
                                                                                                    len(pred_values))
 
-        # Checks to see if the values are within the normal physiological range, otherwise it gives a warning
-        if max(ref_values) > 500 or max(pred_values) > 500:
-            print(
-                "Input Warning: the maximum reference value {0} or the maximum prediction value {1} exceeds the normal physiological range of glucose (<400 mg/dl).".format(
-                    max(ref_values), max(pred_values)))
-        if min(ref_values) < 0 or min(pred_values) < 0:
-            print(
-                "Input Warning: the minimum reference value {0} or the minimum prediction value {1} is less than 0 mg/dl.".format(
-                    min(ref_values), min(pred_values)))
+        # Checks to see if the values are within the normal sensor measurement range, otherwise it gives a warning
+        # Reference values
+        if min(ref_values) < minimum_sensor_reading:
+            print(f'Input Warning: the minimum reference value ({min(ref_values):.2f}) is below the limit of sensor design (Inferior limit: {minimum_sensor_reading} mg/dL).')
+            number_ref_values_low_limit = sum(value < minimum_sensor_reading for value in ref_values)
+            print(f"Number of reference values below the limit: {number_ref_values_low_limit}")
+            print()
 
-        values_out_grid = sum(value > 500 for value in pred_values) + sum(value < 0 for value in pred_values)
-        print(f"Number of values outside the grid: {values_out_grid}")
+        if max(ref_values) > maximum_sensor_reading:
+            print(f'Input Warning: the maximum reference value ({max(ref_values):.2f}) is above the limit of sensor design (Superior limit: {maximum_sensor_reading} mg/dL).')
+            number_ref_values_up_limit = sum(value > maximum_sensor_reading for value in ref_values)
+            print(f"Number of reference values above the limit: {number_ref_values_up_limit}")
+            print()
+
+        # Predicted values
+        min_ref_value = min(pred_values)
+        min_ref_value = round(min_ref_value, 2)
+        number_pred_values_low_limit = 0
+        if min_ref_value < minimum_sensor_reading:
+            print(f'Input Warning: the minimum predicted value ({min_ref_value:.2f}) is below the minimum input value (Inferior limit: {minimum_sensor_reading} mg/dL).')
+            number_pred_values_low_limit = sum(value < minimum_sensor_reading for value in pred_values)
+            # list_of_values_low_limit = [value for value in pred_values if value < minimum_sensor_reading]
+            print(f"Number of predicted values below the limit: {number_pred_values_low_limit}")
+            print()
+
+        max_ref_value = max(pred_values)
+        max_ref_value = round(max_ref_value, 2)
+        number_pred_values_up_limit = 0
+        if max_ref_value > maximum_sensor_reading:
+            print(f'Input Warning: the maximum predicted value ({max_ref_value:.2f}) is above the maximum input value (Superior limit: {maximum_sensor_reading} mg/dL).')
+            number_pred_values_up_limit = sum(value > maximum_sensor_reading for value in pred_values)
+            # list_of_values_up_limit = [value for value in pred_values if value > maximum_sensor_reading]
+            print(f"Number of predicted values above the limit: {number_pred_values_up_limit}")
+            print()
+
+
+
+        # list of out of range values
+        out_range_values = [min_ref_value, number_pred_values_low_limit, max_ref_value, number_pred_values_up_limit]
 
         if show_plot:
             # #Clear plot
@@ -485,13 +587,13 @@ try:
             else:
                 zone[1] += 1  # Zone B
 
-        return zone
+        return zone, out_range_values
 
     def get_values_per_zone(values):
         keys = ['A', 'B', 'C', 'D', 'E']
         return {key: value for key, value in zip(keys, values)}
 
-    def test_by_range(df_result_vector: pd.DataFrame, grid_name:str)->pd.DataFrame:
+    def test_by_range(df_result_vector: pd.DataFrame, grid_name:str)-> tuple[DataFrame, DataFrame, DataFrame]:
         df_result_vector_TBR_2 = df_result_vector[df_result_vector['y_test'] < 54]
 
         df_result_vector_TBR_1 = df_result_vector[
@@ -506,134 +608,186 @@ try:
 
         list_dataframe_by_range = [df_result_vector, df_result_vector_TBR_2, df_result_vector_TBR_1,
                                    df_result_vector_TIR, df_result_vector_TAR_1, df_result_vector_TAR_2]
-        list_dataframe_by_range_name = ['ALL', 'TBR_2', 'TBR_1', 'TIR', 'TAR_1', 'TAR_2']
+        list_dataframe_by_range_name = ['ENTIRE', 'TBR_2', 'TBR_1', 'TIR', 'TAR_1', 'TAR_2']
 
-        df_metrics_summary = pd.DataFrame(
-            columns=['Model', 'A', 'B', 'C', 'D', 'E', 'A + B', 'RMSE', 'MSE', 'MAE', 'MAPE'])
+        df_metrics_summary = pd.DataFrame(columns=['Range', 'A', 'B', 'C', 'D', 'E', 'A + B', 'RMSE', 'MSE', 'MAE', 'MAPE'])
+        df_zones_values = pd.DataFrame(columns=['Range', 'A', 'B', 'C', 'D', 'E'])
+        df_limits = pd.DataFrame(columns=['Range', 'Minimum value', 'Number values below limit', 'Maximum value', 'Number values above limit'])
+
 
         for i in range(6):
             reference_values = list_dataframe_by_range[i]['y_test']
             pred_values = list_dataframe_by_range[i]['y_predict']
             print(f'------- Zone: {list_dataframe_by_range_name[i]} -------')
-            if list_dataframe_by_range_name[i] == 'ALL': # Plot the graph for the ALL zone
-                zone = clarke_error_grid(ref_values=reference_values.values, pred_values=pred_values.values,
-                                     title_string=grid_name + list_dataframe_by_range_name[i], show_plot=True)
+            if list_dataframe_by_range_name[i] == 'ENTIRE': # Plot the graph for the ENTIRE zone
+                zone, out_of_range_values = clarke_error_grid(ref_values=reference_values.values, pred_values=pred_values.values,
+                                     title_string=grid_name, show_plot=True)
             else: # Do not plot the graph for the other zones
-                zone = clarke_error_grid(ref_values=reference_values.values, pred_values=pred_values.values,
+                zone, out_of_range_values = clarke_error_grid(ref_values=reference_values.values, pred_values=pred_values.values,
                                      title_string=grid_name + list_dataframe_by_range_name[i], show_plot=False)
 
-            print(f'Zone Values: {zone}')
-            zone_percentajes = round(pd.Series(zone) / reference_values.shape[0] * 100, 2)
-            print(f'Zone percentages: {zone_percentajes.tolist()}')
+            # Clinical metrics
+            print(f'Zones: [A, B, C, D, E]')
+            print(f'Number of points by zone: {zone}')
+            zone_percentages = round(pd.Series(zone) / reference_values.shape[0] * 100, 2)
+
+            new_row_zone_values = {'Range': list_dataframe_by_range_name[i], 'A': zone[0], 'B': zone[1], 'C': zone[2],
+                                   'D': zone[3], 'E': zone[4]}
+            new_index_zone_values = len(df_zones_values)
+            df_zones_values.loc[new_index_zone_values] = new_row_zone_values
+
+            print(f'Percentage of point by zone: {zone_percentages.tolist()}')
             print()
 
-            # Classic metrics
+            # Non-clinical metrics
             mse = mean_squared_error(reference_values, pred_values)
             rmse = np.sqrt(mean_squared_error(reference_values, pred_values))
             mae = mean_absolute_error(reference_values, pred_values)
             mape = mean_absolute_percentage_error(reference_values, pred_values)
 
-            print(f'Root Mean Squared Error (RMSE): {rmse}')
-            print(f'Mean absolute Error (MAE): {mae}')
-            print(f'Mean absolute percentage Error (MAPE): {mape}')
+            print(f'Mean Squared Error (MSE): {mse:.2f}')
+            print(f'Root Mean Squared Error (RMSE): {rmse:.2f}')
+            print(f'Mean absolute Error (MAE): {mae:.2f}')
+            print(f'Mean absolute percentage Error (MAPE): {mape:.2f}')
 
-            new_row = {'Model': list_dataframe_by_range_name[i], 'A': zone_percentajes[0], 'B': zone_percentajes[1],
-                       'C': zone_percentajes[2], 'D': zone_percentajes[3], 'E': zone_percentajes[4],
-                       'A + B': zone_percentajes[0] + zone_percentajes[1], 'RMSE': rmse, 'MSE': mse, 'MAE': mae,
+            new_row_metrics = {'Range': list_dataframe_by_range_name[i], 'A': zone_percentages[0], 'B': zone_percentages[1],
+                       'C': zone_percentages[2], 'D': zone_percentages[3], 'E': zone_percentages[4],
+                       'A + B': zone_percentages[0] + zone_percentages[1], 'RMSE': rmse, 'MSE': mse, 'MAE': mae,
                        'MAPE': mape}
-            new_index = len(df_metrics_summary)
-            df_metrics_summary.loc[new_index] = new_row
+            new_index_metrics = len(df_metrics_summary)
+            df_metrics_summary.loc[new_index_metrics] = new_row_metrics
+
+            # Save the limits of the values
+            new_row_limits = {'Range': list_dataframe_by_range_name[i],
+                       'Minimum value': out_of_range_values[0], 'Number values below limit': out_of_range_values[1],
+                       'Maximum value': out_of_range_values[2], 'Number values above limit': out_of_range_values[3]}
+            new_index_limits = len(df_limits)
+            df_limits.loc[new_index_limits] = new_row_limits
 
             print()
             print('-' * 100)
             print()
 
-        return df_metrics_summary
+        return df_metrics_summary, df_zones_values, df_limits
 
     #################################################### TRAIN AND TEST ##########################################################
 
     for current_horizon in horizons:  # For all horizons -------------------------------------
-        if repeated_examples:
+
+        if repeated_examples: # Read the data with duplicated examples
             x_train, y_train, x_val, y_val, x_test, y_test = read_windows_with_duplicated(horizon=current_horizon)
-        else:
+
+        else:  # Read the data without duplicated examples
             x_train, y_train, x_val, y_val, x_test, y_test = read_windows_no_duplicated(horizon=current_horizon)
 
-        for current_model in models:  # For all models ---------------------------------------
+        for current_algorithm in algorithms:  # For all models ---------------------------------------
 
-            if current_model == 'Linear':  # prepare linear model
+            if current_algorithm == 'Linear':  # prepare linear model
                 model = prepare_model_linear(history_length)
-            elif current_model == 'LSTM': # prepare LSTM model
+
+            elif current_algorithm == 'LSTM':  # prepare LSTM model
                 model = prepare_model_LSTM(history_length)
-            else: # prepare CNN model
+
+            else:  # prepare CNN model
                 model = prepare_model_CNN(history_length)
 
+            current_name = f"{current_algorithm}_H{current_horizon}"
 
+            print()
             print("######################################################################## - ")
-            print(f'START training {current_model} horizon={current_horizon}')
+            print(f'START training {current_algorithm} - Prediction Horizon={current_horizon}')
             print()
 
             # Record the TRAINING start time
-            start_time = time.time()
+            start_time_training = time.time()
 
             hist, model_trained = train(x_train=x_train, y_train=y_train, x_val=x_val, y_val=y_val, model=model,
-                                        horizon=current_horizon, save_filepath=f"models/{current_model}")
+                                        horizon=current_horizon, save_filepath=f"models/{current_name}")
 
             # Record the TRAINING end time
-            end_time = time.time()
+            end_time_training = time.time()
             # Calculate the elapsed time of TRAINING
-            elapsed_time = end_time - start_time
-            print(f"Training time for {current_model} horizon={current_horizon}: {elapsed_time} seconds")
+            training_time = end_time_training - start_time_training
 
-            get_train_plots_loss(hist, f"plots/{current_model}_H{current_horizon}")
-            get_train_plots_MSE(hist, f"plots/{current_model}_H{current_horizon}")
-
-            df_hist = pd.DataFrame(data=hist.history)
-            df_hist.to_csv(f'hist/df_hist_{current_model}_H{current_horizon}.csv')
-
-            hist_best = df_hist.iloc[df_hist['loss'].idxmin()]
-            hist_best['epoch'] = df_hist.shape[0]
-            hist_best.to_csv(f'hist/hist_best_{current_model}_H{current_horizon}.csv')
+            elapsed_for_training = datetime.timedelta(seconds=training_time)
 
             print()
-            print(f'END training {current_model} horizon={current_horizon}')
+            print(f'END training {current_algorithm} - Prediction Horizon={current_horizon}')
             print("########################################################################")
             print()
 
-            # ## TEST ################################
+            print(f"Training time for {current_algorithm} - Prediction Horizon={current_horizon}: {elapsed_for_training}")
+            print()
 
-            print(f'Test results for {current_model} horizon={current_horizon}')
+            print("######################################################################## - ")
+            print(f'START saving logs for {current_algorithm} - Prediction Horizon={current_horizon}')
+            print()
+
+            get_train_plots_loss(hist, f"plots/{current_name}")
+            get_train_plots_MSE(hist, f"plots/{current_name}")
+
+            df_hist = pd.DataFrame(data=hist.history)
+            df_hist.to_csv(f'hist/df_hist_{current_name}.csv')
+
+            hist_best = df_hist.iloc[df_hist['loss'].idxmin()]
+            hist_best['epoch'] = df_hist.shape[0]
+            hist_best.to_csv(f'hist/hist_best_{current_name}.csv')
+
+            print(f'END saving logs for {current_algorithm} - Prediction Horizon={current_horizon}')
+            print("########################################################################")
+            print()
+
+            # ## TESTING ################################
+
+            print("######################################################################## - ")
+            print(f'START testing for {current_algorithm} - Prediction Horizon={current_horizon}')
+            print()
 
             # Record the TEST start time
-            start_time = time.time()
+            start_time_testing = time.time()
 
-            if current_model == 'Linear':  # load linear model
-                model_load = prepare_model_linear(history_length,
-                                                  weights=f"models/{current_model}{current_horizon}.weights.h5")  # Linear4
-            elif current_model == 'LSTM':  # load LSTM model
-                model_load = prepare_model_LSTM(history_length, weights=f"models/{current_model}{current_horizon}.weights.h5")
-            else:                          # load CNN model
-                model_load = prepare_model_CNN(history_length, weights=f"models/{current_model}{current_horizon}.weights.h5")
+            if current_algorithm == 'Linear':  # load linear model
+                model_load = prepare_model_linear(history_length, weights=f"models/{current_name}.weights.h5")
 
-           
+            elif current_algorithm == 'LSTM':  # load LSTM model
+                model_load = prepare_model_LSTM(history_length, weights=f"models/{current_name}.weights.h5")
+
+            else:  # load CNN model
+                model_load = prepare_model_CNN(history_length, weights=f"models/{current_name}.weights.h5")
+
             bg_predict = model_load.predict(x_test)
 
             # Record the TEST end time
-            end_time = time.time()
+            end_time_testing = time.time()
+
             # Calculate the elapsed time of TEST
-            elapsed_time = end_time - start_time
-            print(f"Testing time for {current_model} horizon={current_horizon}: {elapsed_time} seconds")
+            testing_time = end_time_testing - start_time_testing
+
+            # Convertir a timedelta
+            elapsed_testing = datetime.timedelta(seconds=testing_time)
+
+            print()
+            print(f"Testing time for {current_algorithm} - Prediction Horizon={current_horizon}: {elapsed_testing}")
+
+
+            print()
+            print(f'Test results for {current_algorithm} - Prediction Horizon={current_horizon}')
+            print()
 
             # Save predictions and references
             df_test_results = pd.DataFrame({'y_test': y_test.ravel(), 'y_predict': bg_predict.ravel()})
-            df_test_results.to_parquet(f'test_results/df_test_results_vectors_{current_model}_H{current_horizon}.parquet')
-            # df_test_results.to_csv(f'test_results/df_test_results_vectors_{current_model}_H{current_horizon}.csv')
-            # df_test_results.to_pickle(f'test_results/df_test_results_vectors_{current_model}_H{current_horizon}.pickle')
+            df_test_results.to_parquet(f'test_results/df_test_results_vectors_{current_name}.parquet')
 
-            df_full_range_metrics = test_by_range(df_test_results, f'_{current_model}_H{current_horizon}_')
-            df_full_range_metrics.to_csv(f'test_results/results_by_range_{current_model}_H{current_horizon}.csv')
+            df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results, f'_{current_name}')
+            df_metrics_by_range = df_metrics_by_range.round(2)
+            df_metrics_by_range.to_csv(f'test_results/metrics_performance_by_range_{current_name}.csv', index=False)
+
+            df_zone_values.to_csv(f'test_results/number_of points_by_zones_{current_name}.csv', index=False)
+
+            df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_name}.csv', index=False)
 
 
-            print(f'Test results of {current_model} horizon={current_horizon} - DONE')
+            print(f'Test results of {current_algorithm} - Prediction Horizon={current_horizon} - DONE')
             print('____________________________________________________________________________')
             print()
 finally:
