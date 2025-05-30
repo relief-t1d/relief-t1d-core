@@ -32,19 +32,28 @@ batch_size = 4096
 patience = 50
 max_epoch = 2
 
-# Path to the windows data
-windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/general/'
+# Path to the windows data (must include final slash)
+windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/new_2025/'
 
 history_length = 8  # 2h
 
-horizons = [2, 4]
+horizons = [2, 4, 6, 8, 12, 16]
 algorithms = ['Linear', 'LSTM', 'CNN']
 
 # Sensor reading limits
 maximum_sensor_reading = 500
 minimum_sensor_reading = 40
 
-repeated_examples = False
+# Duplicated inter e intra sets flags
+deduplicate_train = True
+deduplicate_val = True
+deduplicate_test = True
+
+# deduplicate_between_train_val = True
+# deduplicate_between_train_test = True
+#
+# deduplicate_between_val_test = False
+# remove_val_duplicates_instead_of_test = False # If true the duplicated windows will be removed from the validation set instead of the test set
 
 ###################### END CONFIG EXPERIMENT #############################
 
@@ -150,7 +159,8 @@ print()
 # ----------------------- End print the system information -----------------------
 
 try:
-    def read_windows_no_duplicated(horizon):
+
+    def read_windows(horizon):
         file_x_train = f"{windows_path}x_train_windows_horizon_{horizon}.npy"
         file_y_train = f"{windows_path}y_train_windows_horizon_{horizon}.npy"
         file_x_val = f"{windows_path}x_val_windows_horizon_{horizon}.npy"
@@ -158,109 +168,397 @@ try:
         file_x_test = f"{windows_path}x_test_windows_horizon_{horizon}.npy"
         file_y_test = f"{windows_path}y_test_windows_horizon_{horizon}.npy"
 
+        ##### TRAINING SET #####
         print(f"Reading training files {file_x_train} and {file_y_train}...")
-        print(f"Reading training files {file_x_val} and {file_y_val}...")
-        print(f"Reading test files {file_x_test} and {file_y_test}...")
 
         x_train = np.load(file_x_train)
         y_train = np.load(file_y_train)
-        x_val = np.load(file_x_val)
-        y_val = np.load(file_y_val)
-        x_test = np.load(file_x_test)
-        y_test = np.load(file_y_test)
-
-        ####### Remove duplicated ###########
-
-        ### On Train data #############
 
         # merge arrays
         df_x = pd.DataFrame(x_train)  # All x
         df_y = pd.DataFrame(y_train[:, -1])  # Last column of y
-        df = pd.concat([df_x, df_y], axis=1)
+        df_train = pd.concat([df_x, df_y], axis=1)  # Actual input, output windows for current horizon
 
-        # Find duplicated
-        dup = df.duplicated()
-        print()
-        print(f'Array Train duplicated:')
-        print(dup.value_counts())
+        # Entradas: x0 a x7, Salida: y
+        new_cols = [f"x{i}" for i in range(8)] + ["y"]
+        df_train.columns = new_cols
 
-        # Remove duplicated
-        df = df[~dup]
-        df.reset_index(inplace=True, drop=True)
+        # Hashing to identify duplicates
 
-        x_train = df.iloc[:, :-1].values  # Get all columns but the last one
-        y_train = df.iloc[:, -1:].values  # Get just the last column
+        # If not all the columns must be used to hash, uncomment the next lines
+        # cols_to_hash = [col for col in df_train.columns if col not in ["timestamp", "id", "hash"]]
+        # df_train["hash"] = pd.util.hash_pandas_object(df_train[cols_to_hash], index=False)
 
-        ### On Validation data #############
+        # If all the columns must be used to hash, uncomment the next line
+        df_train["hash"] = pd.util.hash_pandas_object(df_train, index=False)
+
+        ##### VALIDATION SET #####
+        print(f"Reading training files {file_x_val} and {file_y_val}...")
+
+        x_val = np.load(file_x_val)
+        y_val = np.load(file_y_val)
 
         # merge arrays
         df_x = pd.DataFrame(x_val)  # All x
         df_y = pd.DataFrame(y_val[:, -1])  # Last column of y
-        df = pd.concat([df_x, df_y], axis=1)
+        df_val = pd.concat([df_x, df_y], axis=1)  # Actual input, output windows for current horizon
 
-        # Find duplicated
-        dup = df.duplicated()
-        print()
-        print(f'Array val duplicated:')
-        print(dup.value_counts())
+        # Entradas: x0 a x7, Salida: y
+        new_cols = [f"x{i}" for i in range(8)] + ["y"]
+        df_val.columns = new_cols
 
-        # Remove duplicated
-        df = df[~dup]
-        df.reset_index(inplace=True, drop=True)
+        # Hashing to identify duplicates
+        df_val["hash"] = pd.util.hash_pandas_object(df_val, index=False)
 
-        x_val = df.iloc[:, :-1].values  # Get all columns but the last one
-        y_val = df.iloc[:, -1:].values  # Get just the last column
+        ##### TEST SET #####
+        print(f"Reading test files {file_x_test} and {file_y_test}...")
 
-        ### On Test data #############
+        x_test = np.load(file_x_test)
+        y_test = np.load(file_y_test)
 
         # merge arrays
         df_x = pd.DataFrame(x_test)  # All x
         df_y = pd.DataFrame(y_test[:, -1])  # Last column of y
-        df = pd.concat([df_x, df_y], axis=1)
+        df_test = pd.concat([df_x, df_y], axis=1)  # Actual input, output windows for current horizon
 
-        # Find duplicated
-        dup = df.duplicated()
-        print()
-        print(f'Array test duplicated:')
-        print(dup.value_counts())
+        # Entradas: x0 a x7, Salida: y
+        new_cols = [f"x{i}" for i in range(8)] + ["y"]
+        df_test.columns = new_cols
 
-        # Remove duplicated
-        df = df[~dup]
-        df.reset_index(inplace=True, drop=True)
+        # Hashing to identify duplicates
+        df_test["hash"] = pd.util.hash_pandas_object(df_test, index=False)
 
-        x_test = df.iloc[:, :-1].values  # Get all columns but the last one
-        y_test = df.iloc[:, -1:].values  # Get just the last column
+        ############################## Deduplicated ON SETS #########################
+
+        ############# On training set #############
+        if deduplicate_train:
+            # Find duplicated
+            dup = df_train.duplicated()
+            print()
+            print(f'Duplicated on training set :')
+            print(dup.value_counts())
+
+            # Remove duplicated
+            df_train = df_train.drop_duplicates()
+            df_train.reset_index(inplace=True, drop=True)
+
+        ############# On validation set #############
+        if deduplicate_val:
+            # Find duplicated
+            dup = df_val.duplicated()
+            print()
+            print(f'Duplicated on validation set :')
+            print(dup.value_counts())
+
+            # Remove duplicated
+            df_val = df_val.drop_duplicates()
+            df_val.reset_index(inplace=True, drop=True)
+
+        ############# On test set #############
+        if deduplicate_test:
+            # Find duplicated
+            dup = df_test.duplicated()
+            print()
+            print(f'Duplicated on test set :')
+            print(dup.value_counts())
+
+            # Remove duplicated
+            df_test = df_test.drop_duplicates()
+            df_test.reset_index(inplace=True, drop=True)
+
+        ############################## Cross-set Deduplication #########################
+        if deduplicate_between_train_val:
+            before = len(df_val)
+            df_val = df_val[~df_val["hash"].isin(df_train["hash"])]
+            df_val.reset_index(inplace=True, drop=True)
+            print(f"\nRemoved {before - len(df_val)} windows from validation that were in training.")
+
+        if deduplicate_between_train_test:
+            before = len(df_test)
+            df_test = df_test[~df_test["hash"].isin(df_train["hash"])]
+            df_test.reset_index(inplace=True, drop=True)
+            print(f"\nRemoved {before - len(df_test)} windows from test that were in training.")
+
+        if deduplicate_between_val_test:
+            if remove_val_duplicates_instead_of_test:
+                before = len(df_val)
+                df_val = df_val[~df_val["hash"].isin(df_test["hash"])]
+                print(f"\nRemoved {before - len(df_val)} windows from validation that were in test.")
+                df_val.reset_index(drop=True, inplace=True)
+            else:
+                before = len(df_test)
+                df_test = df_test[~df_test["hash"].isin(df_val["hash"])]
+                print(f"\nRemoved {before - len(df_test)} windows from test that were in validation.")
+                df_test.reset_index(drop=True, inplace=True)
+
+        x_train = df_train.iloc[:, :-2].values  # Get all columns but the last two
+        y_train = df_train.iloc[:, -2:-1].values  # Get just the one before the last column
+
+        x_val = df_val.iloc[:, :-2].values  # Get all columns but the last one
+        y_val = df_val.iloc[:, -2:-1].values  # Get just the last column
+
+        x_test = df_test.iloc[:, :-2].values  # Get all columns but the last two
+        y_test = df_test.iloc[:, -2:-1].values  # Get just the one before the last column
 
         return x_train, y_train, x_val, y_val, x_test, y_test
 
-    def read_windows_with_duplicated(horizon):
-        file_x_train = f"{windows_path}x_train_windows_horizon_{horizon}.npy"
-        file_y_train = f"{windows_path}y_train_windows_horizon_{horizon}.npy"
-        file_x_val = f"{windows_path}x_val_windows_horizon_{horizon}.npy"
-        file_y_val = f"{windows_path}y_val_windows_horizon_{horizon}.npy"
-        file_x_test = f"{windows_path}x_test_windows_horizon_{horizon}.npy"
-        file_y_test = f"{windows_path}y_test_windows_horizon_{horizon}.npy"
+    def read_windows_2025(horizon):
+        # file_x_train = f"{windows_path}x_train_windows_horizon_{horizon}.npy"
+        # file_y_train = f"{windows_path}y_train_windows_horizon_{horizon}.npy"
+        # file_x_val = f"{windows_path}x_val_windows_horizon_{horizon}.npy"
+        # file_y_val = f"{windows_path}y_val_windows_horizon_{horizon}.npy"
+        # file_x_test = f"{windows_path}x_test_windows_horizon_{horizon}.npy"
+        # file_y_test = f"{windows_path}y_test_windows_horizon_{horizon}.npy"
+        #
+        # ##### TRAINING SET #####
+        print(f"Reading training files from {windows_path} for horizon {horizon}...")
+        df_train = pd.read_parquet(f"{windows_path}train_windows_horizon_{horizon}.parquet")
+        train_unique_patient_ids = df_train['patient_id'].unique()
+        print(f"Unique patient IDs in training set: {len(train_unique_patient_ids)}")
 
-        print(f"Reading training files {file_x_train} and {file_y_train}...")
-        print(f"Reading training files {file_x_val} and {file_y_val}...")
-        print(f"Reading test files {file_x_test} and {file_y_test}...")
+        #
+        # x_train = np.load(file_x_train)
+        # y_train = np.load(file_y_train)
+        #
+        # # merge arrays
+        # df_x = pd.DataFrame(x_train)  # All x
+        # df_y = pd.DataFrame(y_train[:, -1])  # Last column of y
+        # df_train = pd.concat([df_x, df_y], axis=1)  # Actual input, output windows for current horizon
+        #
+        # # Entradas: x0 a x7, Salida: y
+        # new_cols = [f"x{i}" for i in range(8)] + ["y"]
+        # df_train.columns = new_cols
+        #
+        # # Hashing to identify duplicates
+        #
+        # # If not all the columns must be used to hash, uncomment the next lines
+        # # cols_to_hash = [col for col in df_train.columns if col not in ["timestamp", "id", "hash"]]
+        # # df_train["hash"] = pd.util.hash_pandas_object(df_train[cols_to_hash], index=False)
+        #
+        # # If all the columns must be used to hash, uncomment the next line
+        # df_train["hash"] = pd.util.hash_pandas_object(df_train, index=False)
 
-        x_train = np.load(file_x_train)
-        y_train = np.load(file_y_train)
-        x_val = np.load(file_x_val)
-        y_val = np.load(file_y_val)
-        x_test = np.load(file_x_test)
-        y_test = np.load(file_y_test)
+        ##### VALIDATION SET #####
+        print(f"Reading validation files from {windows_path} for horizon {horizon}...")
+        df_val = pd.read_parquet(f"{windows_path}val_windows_horizon_{horizon}.parquet")
+        val_unique_patient_ids = df_val['patient_id'].unique()
+        print(f"Unique patient IDs in validation set: {len(val_unique_patient_ids)}")
 
-        # Using only the horizon measurement as a label
-        y_train = y_train[:, -1]
-        y_train = y_train.reshape((y_train.shape[0], 1))
-        y_val = y_val[:, -1]
-        y_val = y_val.reshape((y_val.shape[0], 1))
-        y_test = y_test[:, -1]
-        y_test = y_test.reshape((y_test.shape[0], 1))
+        # x_val = np.load(file_x_val)
+        # y_val = np.load(file_y_val)
+        #
+        # # merge arrays
+        # df_x = pd.DataFrame(x_val)  # All x
+        # df_y = pd.DataFrame(y_val[:, -1])  # Last column of y
+        # df_val = pd.concat([df_x, df_y], axis=1)  # Actual input, output windows for current horizon
+        #
+        # # Entradas: x0 a x7, Salida: y
+        # new_cols = [f"x{i}" for i in range(8)] + ["y"]
+        # df_val.columns = new_cols
+
+        # Hashing to identify duplicates
+        # df_val["hash"] = pd.util.hash_pandas_object(df_val, index=False)
+
+        ##### TEST SET #####
+        print(f"Reading test files from {windows_path} for horizon {horizon}...")
+        df_test = pd.read_parquet(f"{windows_path}test_windows_horizon_{horizon}.parquet")
+        test_unique_patient_ids = df_test['patient_id'].unique()
+        print(f"Unique patient IDs in test set: {len(test_unique_patient_ids)}")
+
+        # x_test = np.load(file_x_test)
+        # y_test = np.load(file_y_test)
+        #
+        # # merge arrays
+        # df_x = pd.DataFrame(x_test)  # All x
+        # df_y = pd.DataFrame(y_test[:, -1])  # Last column of y
+        # df_test = pd.concat([df_x, df_y], axis=1)  # Actual input, output windows for current horizon
+        #
+        # # Entradas: x0 a x7, Salida: y
+        # new_cols = [f"x{i}" for i in range(8)] + ["y"]
+        # df_test.columns = new_cols
+
+        # Hashing to identify duplicates
+        # df_test["hash"] = pd.util.hash_pandas_object(df_test, index=False)
+
+        ############################## Deduplicated ON SETS #########################
+
+        ############# On training set #############
+        if deduplicate_train:
+            # Find duplicated and remove them. Also get the statistics
+            total_rows = len(df_train)
+            df_train_dedup = df_train.drop_duplicates()
+            total_unique = len(df_train_dedup)
+            total_duplicates = total_rows - total_unique
+            duplicate_percentage = (total_duplicates / total_rows) * 100
+
+            print("\n📊 Duplicates in training set:")
+            print(f"- Total rows      : {total_rows}")
+            print(f"- Unique rows     : {total_unique}")
+            print(f"- Duplicated rows : {total_duplicates}")
+            print(f"- % duplicated    : {duplicate_percentage:.2f}%")
+
+            # Replace original DataFrame
+            df_train = df_train_dedup.reset_index(drop=True)
+
+        ############# On validation set #############
+        if deduplicate_val:
+            # Find duplicated and remove them. Also get the statistics
+            total_rows = len(df_val)
+            df_val_dedup = df_val.drop_duplicates()
+            total_unique = len(df_val_dedup)
+            total_duplicates = total_rows - total_unique
+            duplicate_percentage = (total_duplicates / total_rows) * 100
+
+            print("\n📊 Duplicates in validation set:")
+            print(f"- Total rows      : {total_rows}")
+            print(f"- Unique rows     : {total_unique}")
+            print(f"- Duplicated rows : {total_duplicates}")
+            print(f"- % duplicated    : {duplicate_percentage:.2f}%")
+
+            # Replace original DataFrame
+            df_val = df_val_dedup.reset_index(drop=True)
+
+        ############# On test set #############
+        if deduplicate_test:
+            # Find duplicated and remove them. Also get the statistics
+            total_rows = len(df_test)
+            df_test_dedup = df_test.drop_duplicates()
+            total_unique = len(df_test_dedup)
+            total_duplicates = total_rows - total_unique
+            duplicate_percentage = (total_duplicates / total_rows) * 100
+
+            print("\n📊 Duplicates in test set:")
+            print(f"- Total rows      : {total_rows}")
+            print(f"- Unique rows     : {total_unique}")
+            print(f"- Duplicated rows : {total_duplicates}")
+            print(f"- % duplicated    : {duplicate_percentage:.2f}%")
+
+            # Replace original DataFrame
+            df_test = df_test_dedup.reset_index(drop=True)
+
+        x_train = df_train.iloc[:, :-2].values  # Get all columns but the last two
+        y_train = df_train.iloc[:, -2:-1].values  # Get just the one before the last column
+
+        x_val = df_val.iloc[:, :-2].values  # Get all columns but the last one
+        y_val = df_val.iloc[:, -2:-1].values  # Get just the last column
+
+        x_test = df_test.iloc[:, :-2].values  # Get all columns but the last two
+        y_test = df_test.iloc[:, -2:-1].values  # Get just the one before the last column
 
         return x_train, y_train, x_val, y_val, x_test, y_test
+
+    #####################################################################################
+    # def read_windows_no_duplicated(horizon):
+    #     file_x_train = f"{windows_path}x_train_windows_horizon_{horizon}.npy"
+    #     file_y_train = f"{windows_path}y_train_windows_horizon_{horizon}.npy"
+    #     file_x_val = f"{windows_path}x_val_windows_horizon_{horizon}.npy"
+    #     file_y_val = f"{windows_path}y_val_windows_horizon_{horizon}.npy"
+    #     file_x_test = f"{windows_path}x_test_windows_horizon_{horizon}.npy"
+    #     file_y_test = f"{windows_path}y_test_windows_horizon_{horizon}.npy"
+    #
+    #     print(f"Reading training files {file_x_train} and {file_y_train}...")
+    #     print(f"Reading training files {file_x_val} and {file_y_val}...")
+    #     print(f"Reading test files {file_x_test} and {file_y_test}...")
+    #
+    #     x_train = np.load(file_x_train)
+    #     y_train = np.load(file_y_train)
+    #     x_val = np.load(file_x_val)
+    #     y_val = np.load(file_y_val)
+    #     x_test = np.load(file_x_test)
+    #     y_test = np.load(file_y_test)
+    #
+    #     ####### Remove duplicated ###########
+    #
+    #     ### On Train data #############
+    #
+    #     # merge arrays
+    #     df_x = pd.DataFrame(x_train)  # All x
+    #     df_y = pd.DataFrame(y_train[:, -1])  # Last column of y
+    #     df = pd.concat([df_x, df_y], axis=1)
+    #
+    #     # Find duplicated
+    #     dup = df.duplicated()
+    #     print()
+    #     print(f'Array Train duplicated:')
+    #     print(dup.value_counts())
+    #
+    #     # Remove duplicated
+    #     df = df[~dup]
+    #     df.reset_index(inplace=True, drop=True)
+    #
+    #     x_train = df.iloc[:, :-1].values  # Get all columns but the last one
+    #     y_train = df.iloc[:, -1:].values  # Get just the last column
+    #
+    #     ### On Validation data #############
+    #
+    #     # merge arrays
+    #     df_x = pd.DataFrame(x_val)  # All x
+    #     df_y = pd.DataFrame(y_val[:, -1])  # Last column of y
+    #     df = pd.concat([df_x, df_y], axis=1)
+    #
+    #     # Find duplicated
+    #     dup = df.duplicated()
+    #     print()
+    #     print(f'Array val duplicated:')
+    #     print(dup.value_counts())
+    #
+    #     # Remove duplicated
+    #     df = df[~dup]
+    #     df.reset_index(inplace=True, drop=True)
+    #
+    #     x_val = df.iloc[:, :-1].values  # Get all columns but the last one
+    #     y_val = df.iloc[:, -1:].values  # Get just the last column
+    #
+    #     ### On Test data #############
+    #
+    #     # merge arrays
+    #     df_x = pd.DataFrame(x_test)  # All x
+    #     df_y = pd.DataFrame(y_test[:, -1])  # Last column of y
+    #     df = pd.concat([df_x, df_y], axis=1)
+    #
+    #     # Find duplicated
+    #     dup = df.duplicated()
+    #     print()
+    #     print(f'Array test duplicated:')
+    #     print(dup.value_counts())
+    #
+    #     # Remove duplicated
+    #     df = df[~dup]
+    #     df.reset_index(inplace=True, drop=True)
+    #
+    #     x_test = df.iloc[:, :-1].values  # Get all columns but the last one
+    #     y_test = df.iloc[:, -1:].values  # Get just the last column
+    #
+    #     return x_train, y_train, x_val, y_val, x_test, y_test
+    #
+    # def read_windows_with_duplicated(horizon):
+    #     file_x_train = f"{windows_path}x_train_windows_horizon_{horizon}.npy"
+    #     file_y_train = f"{windows_path}y_train_windows_horizon_{horizon}.npy"
+    #     file_x_val = f"{windows_path}x_val_windows_horizon_{horizon}.npy"
+    #     file_y_val = f"{windows_path}y_val_windows_horizon_{horizon}.npy"
+    #     file_x_test = f"{windows_path}x_test_windows_horizon_{horizon}.npy"
+    #     file_y_test = f"{windows_path}y_test_windows_horizon_{horizon}.npy"
+    #
+    #     print(f"Reading training files {file_x_train} and {file_y_train}...")
+    #     print(f"Reading training files {file_x_val} and {file_y_val}...")
+    #     print(f"Reading test files {file_x_test} and {file_y_test}...")
+    #
+    #     x_train = np.load(file_x_train)
+    #     y_train = np.load(file_y_train)
+    #     x_val = np.load(file_x_val)
+    #     y_val = np.load(file_y_val)
+    #     x_test = np.load(file_x_test)
+    #     y_test = np.load(file_y_test)
+    #
+    #     # Using only the horizon measurement as a label
+    #     y_train = y_train[:, -1]
+    #     y_train = y_train.reshape((y_train.shape[0], 1))
+    #     y_val = y_val[:, -1]
+    #     y_val = y_val.reshape((y_val.shape[0], 1))
+    #     y_test = y_test[:, -1]
+    #     y_test = y_test.reshape((y_test.shape[0], 1))
+    #
+    #     return x_train, y_train, x_val, y_val, x_test, y_test
 
     ## Algorithms architectures ################################################
     from keras.layers import Dense, LSTM, GRU, Lambda, dot, concatenate, Activation, Input
@@ -674,11 +972,13 @@ try:
 
     for current_horizon in horizons:  # For all horizons -------------------------------------
 
-        if repeated_examples: # Read the data with duplicated examples
-            x_train, y_train, x_val, y_val, x_test, y_test = read_windows_with_duplicated(horizon=current_horizon)
+        # if repeated_examples: # Read the data with duplicated examples
+        #     x_train, y_train, x_val, y_val, x_test, y_test = read_windows_with_duplicated(horizon=current_horizon)
+        #
+        # else:  # Read the data without duplicated examples
+        #     x_train, y_train, x_val, y_val, x_test, y_test = read_windows_new(horizon=current_horizon)
 
-        else:  # Read the data without duplicated examples
-            x_train, y_train, x_val, y_val, x_test, y_test = read_windows_no_duplicated(horizon=current_horizon)
+        x_train, y_train, x_val, y_val, x_test, y_test = read_windows_2025(horizon=current_horizon)
 
         for current_algorithm in algorithms:  # For all models ---------------------------------------
 
