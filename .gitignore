@@ -7,3 +7,4 @@ Train/20250520_104818_train_log.out
 *.out
 Train_dropout/test_results
 Train_dropout/plots
+Train_dropout_0.4
