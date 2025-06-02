@@ -8,3 +8,8 @@ Train/20250520_104818_train_log.out
 Train_dropout/test_results
 Train_dropout/plots
 Train_dropout_0.4
+Cross_validation/hist
+Cross_validation/models
+Cross_validation/plots
+Cross_validation/test_results
+Train_dropout_0.1
