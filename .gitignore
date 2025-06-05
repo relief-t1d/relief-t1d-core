@@ -14,3 +14,4 @@ Cross_validation/plots
 Cross_validation/test_results
 Train_dropout_0.1
 Cross_validation/Exp1_no_drop_no_recurrent
+Cross_validation/Exp4_drop_0.1_recurrent_0.2
