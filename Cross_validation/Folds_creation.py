@@ -1,0 +1,280 @@
+import pandas as pd
+import os
+import random
+from collections import Counter
+from typing import Dict, List
+
+# Type alias for clarity: each fold is a dict with three lists of patient IDs (str)
+Fold = Dict[str, List[str]]      # {'train': [...], 'val': [...], 'test': [...]}
+
+path_read_data = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/no_split_2025_deduplicated_intra_patient/'
+path_to_save_folds = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/all_folds_deduplicated_intra_patient_val_greedy/'
+horizon_list = [2, 4, 6, 8, 12, 16]
+number_of_folds = 5
+validation_fraction = 0.15
+
+
+# Functions -------------------------
+def make_folds_greedy_splits(patient_windows: Dict[str, int],
+                             k: int = 5,
+                             val_frac: float = 0.10,
+                             seed: int = 42) -> List[Fold]:
+    """
+    Distributes patients across k folds such that each fold has a balanced number of total windows in its test set.
+    Then, for each fold, assigns the remaining patients to train and validation sets, trying to preserve window balance.
+
+    Parameters:
+    - patient_windows: dict with patient ID (str) as key and number of training windows (int) as value.
+    - k: number of folds to generate.
+    - val_frac: fraction (0-1) of remaining windows to allocate to validation in each fold.
+    - seed: random seed for reproducibility.
+
+    Returns:
+    - List of k folds, each a dictionary with 'train', 'val', 'test' patient ID lists.
+    """
+    rng = random.Random(seed)  # Controlled random generator for reproducibility
+
+    # Convert patient dict to list of (id, window_count) pairs
+    items = list(patient_windows.items())
+    rng.shuffle(items)  # Shuffle to break ties fairly between patients with equal window counts
+    items.sort(key=lambda x: x[1], reverse=True)  # Sort by descending number of windows
+
+    # Step 1: Assign test patients to folds by balancing total number of windows using greedy strategy
+    test_folds: List[List[str]] = [[] for _ in range(k)]
+    fold_load: List[int] = [0] * k  # Keeps track of window total for each fold
+
+    for current_patient_id, current_patient_number_of_windows in items:
+        # Find the fold with the smallest current load and assign the patient there
+        idx = fold_load.index(min(fold_load))
+        test_folds[idx].append(current_patient_id)
+        fold_load[idx] += current_patient_number_of_windows
+
+    # Step 2: For each fold, assign the remaining patients to train and val, also attempting to balance window volume
+    all_patient_ids = list(patient_windows.keys())
+    folds: List[Fold] = []
+
+    for i in range(k):
+        test_ids = set(test_folds[i])
+        remaining_ids = [patient_id for patient_id in all_patient_ids if patient_id not in test_ids]
+
+        # Sort remaining by descending window count (with shuffle before to break ties randomly)
+        rng.shuffle(remaining_ids)
+        remaining_items = [(patient_id, patient_windows[patient_id]) for patient_id in remaining_ids]
+        remaining_items.sort(key=lambda x: x[1], reverse=True)
+
+        # Target total for validation windows
+        total_remaining_windows = sum(count for _, count in remaining_items)
+        target_val_windows = val_frac * total_remaining_windows
+
+        val_ids, train_ids = [], []
+        val_total, train_total = 0, 0
+
+        # Assign patients to validation until target reached, then assign to train
+        for j, (pid, count) in enumerate(remaining_items):
+            if val_total < target_val_windows:
+                val_ids.append(pid)
+                val_total += count
+            else:
+                break
+
+        train_ids = [pid for pid, _ in remaining_items[j:]]
+
+        # Store the fold split
+        folds.append({
+            'train': sorted(train_ids),
+            'val': sorted(val_ids),
+            'test': sorted(test_folds[i])
+        })
+
+    return folds
+
+
+def validate_folds(folds: List[Fold], patient_measurements: Dict[str, int], tolerance_pct: float = 10.0,
+                   horizon: int = 2) -> None:
+    """
+    Validate a list of patient-wise cross-validation folds.
+
+    Parameters
+    ----------
+    folds : list[Fold]
+        Output of `make_folds_greedy_splits` or similar.  Each element is a
+        dictionary with keys ``'train'``, ``'val'``, ``'test'`` mapping to lists
+        of patient IDs **(strings)**.
+
+    patient_measurements : dict[str, int]
+        Mapping ``{patient_id: number_of_measurements}``.  Used to check load
+        balancing (Rule R4).
+
+    tolerance_pct : float, default 10.0
+        Maximum allowed percentage deviation from the mean test load before
+        a warning is raised (Rule R4).
+
+    horizon : int, default 2
+        The horizon used for the folds, included in the printed messages.
+
+    Raises
+    ------
+    AssertionError
+        If any of the mandatory rules (R1–R3) is violated.
+
+    Side effects
+    ------------
+    * Prints a success message for each rule that passes.
+    * Prints the test-set load per fold and the percentage deviation from the
+      mean (always), and a warning if any fold exceeds *tolerance_pct*.
+
+    Notes
+    -----
+    *R4* (load balance) is **informative**; it does **not** raise an error.
+    Adjust *tolerance_pct* as appropriate for your project.
+    """
+
+    print(f"\nValidating folds for horizon: {horizon}...")
+
+    all_patients = set(patient_measurements)
+
+    # ------------------------------------------------------------------ R1/R3
+    for idx, fold in enumerate(folds):
+        tr, va, te = map(set, (fold['train'], fold['val'], fold['test']))
+
+        # R1 – exclusivity within the same fold
+        assert tr.isdisjoint(va) and tr.isdisjoint(te) and va.isdisjoint(te), (
+            f"[R1] Overlap detected in fold {idx}"
+        )
+
+        # R3 – union covers the entire cohort
+        assert len(tr | va | te) == len(all_patients), (
+            f"[R3] Missing patients in fold {idx}"
+        )
+
+    print("\n ✓ R1 and R3 passed for every fold.")
+
+    # ------------------------------------------------------------------ R2
+    test_counter = Counter(pid for fold in folds for pid in fold['test'])
+    duplicates = [pid for pid, cnt in test_counter.items() if cnt != 1]
+
+    assert not duplicates, (
+        f"[R2] Patients appearing in test 0 or >1 times: {duplicates}"
+    )
+    print("✓ R2 passed – each patient appears in *test* exactly once.")
+
+    # ------------------------------------------------------------------ R4 (informative)
+    def test_load(ids: List[str]) -> int:
+        """Total number of measurements for this group of patients."""
+        return sum(patient_measurements[pid] for pid in ids)
+
+    loads = [test_load(f['test']) for f in folds]
+    mean_load = sum(loads) / len(loads)
+    pct_dev = [100 * (l - mean_load) / mean_load for l in loads]
+
+    print("\nTest-set load per fold (number of measurements):", loads)
+    print("Deviation from mean (%)                      :", [round(p, 2) for p in pct_dev])
+
+    if any(abs(p) > tolerance_pct for p in pct_dev):
+        print(f"⚠️  [R4] Warning: at least one fold deviates by more than {tolerance_pct}% "
+              "from the mean test load.")
+    else:
+        print(f"✓ R4 passed – test loads within ±{tolerance_pct}% of the mean.")
+
+    print(f"\nAll mandatory validation checks for horizon {horizon} completed successfully.")
+
+
+def tag_folds_and_save(
+        df_windows: pd.DataFrame,
+        folds: List[Fold],
+        output_path: str,
+        filename: str = "windows_with_folds_horizon_{horizon}.parquet",
+        horizon: int = 2,
+        column_prefix: str = "fold") -> None:
+    """
+    Add one column per fold (fold0 … fold{k-1}) indicating whether each window
+    belongs to 'train', 'val' or 'test' in that fold, then write a single
+    Parquet file.
+
+    Parameters
+    ----------
+    df_windows : pd.DataFrame
+        Original window table (must include column 'patient_id').
+
+    folds : list[Fold]
+        Output from make_folds_greedy_splits (patient IDs per split).
+
+    output_path : str
+        Destination filename, e.g. 'windows_with_folds.parquet'.
+
+    column_prefix : str, default "fold"
+        Prefix for the new columns: fold0, fold1, …
+
+    parquet_kwargs : dict, optional
+        Extra arguments passed to DataFrame.to_parquet.
+    """
+    df_tagged = df_windows.copy()
+
+    for idx, fold in enumerate(folds):
+        # Build a mapping patient_id -> split label for this fold
+        label_map = {pid: "train" for pid in fold["train"]}
+        label_map.update({pid: "val" for pid in fold["val"]})
+        label_map.update({pid: "test" for pid in fold["test"]})
+
+        col_name = f"{column_prefix}{idx}"
+        df_tagged[col_name] = df_tagged["patient_id"].map(label_map).astype("category")
+
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
+    df_tagged.to_parquet(f'{output_path}{filename}_horizon_{horizon}.parquet', index=False)
+    print(f"\n ✓ File {filename}_horizon_{horizon} written: {output_path}  "
+          f"({len(df_windows):,} rows, {len(folds)} fold-columns)")
+
+    return df_tagged
+
+
+for horizon in horizon_list:
+    print(f"\nReading data file from {path_read_data} for horizon {horizon}...")
+    df_windows = pd.read_parquet(f"{path_read_data}windows_horizon_{horizon}.parquet")
+    unique_patient_ids = df_windows['patient_id'].unique()
+    num_patients = len(unique_patient_ids)
+
+    # Count the number of windows per patient and convert to a dictionary
+    patient_number_windows_dict = (
+        df_windows
+        .groupby("patient_id")  # group all rows that share the same ID
+        .size()  # count rows per group
+        .astype(int)  # ensure Python int, not numpy int64
+        .to_dict()  # ==> { 'ID_1': n1, 'ID_2': n2, ... }
+    )
+
+    # Create folds using the greedy split function
+    folds_split = make_folds_greedy_splits(patient_number_windows_dict, k=number_of_folds, val_frac=validation_fraction,
+                                           seed=42)
+
+    # Print statistics of the folds created
+    print(f'\n ------- Statistics of folds created for horizon: {horizon}-------')
+    for i, fold in enumerate(folds_split):
+        print(f"\n---- Fold {i + 1}: -----")
+        print("-- Totals --")
+        print(
+            f"  Train: {len(fold['train'])} patients. Total windows: {sum(patient_number_windows_dict[pid] for pid in fold['train'])}")
+        print(
+            f"  Val:   {len(fold['val'])} patients. Total windows: {sum(patient_number_windows_dict[pid] for pid in fold['val'])}")
+        print(
+            f"  Test:  {len(fold['test'])} patients. Total windows: {sum(patient_number_windows_dict[pid] for pid in fold['test'])}")
+
+        print("\n -- Percentages --")
+        print(
+            f"  Train: {(len(fold['train']) / num_patients * 100):.2f} percentage of patients. Percentage of windows: {(sum(patient_number_windows_dict[pid] for pid in fold['train']) / sum(patient_number_windows_dict.values()) * 100):.2f}%")
+        print(
+            f"  Val:   {(len(fold['val']) / num_patients * 100):.2f} percentage of patients. Percentage of windows: {(sum(patient_number_windows_dict[pid] for pid in fold['val']) / sum(patient_number_windows_dict.values()) * 100):.2f}%")
+        print(
+            f"  Test:  {(len(fold['test']) / num_patients * 100):.2f} percentage of patients. Percentage of windows: {(sum(patient_number_windows_dict[pid] for pid in fold['test']) / sum(patient_number_windows_dict.values()) * 100):.2f}%")
+
+    print(f'\nEnd of statistics for folds created for horizon: {horizon}')
+
+    # Validate the folds created
+    validate_folds(folds=folds_split, patient_measurements=patient_number_windows_dict, horizon=horizon)
+
+    # save_folds_as_parquet(df_windows, folds_split, "c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/")
+
+    # Save the folds as Parquet files
+    df_all = tag_folds_and_save(df_windows, folds_split, path_to_save_folds, 'windows_with_folds', horizon=horizon,
+                                column_prefix='fold_')
