@@ -8,7 +8,7 @@ from typing import Dict, List
 Fold = Dict[str, List[str]]      # {'train': [...], 'val': [...], 'test': [...]}
 
 path_read_data = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/no_split_2025_deduplicated_intra_patient/'
-path_to_save_folds = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/all_folds_deduplicated_intra_patient_val_greedy/'
+path_to_save_folds = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/all_folds_deduplicated_intra_patient_val_greedy_V2/'
 horizon_list = [2, 4, 6, 8, 12, 16]
 number_of_folds = 5
 validation_fraction = 0.15

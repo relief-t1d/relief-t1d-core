@@ -100,7 +100,7 @@ for current_horizon in horizons:
                                                    horizon=current_horizon, deduplicate_intra_patient=remove_duplicates_intra_patient)
 
     # NOTE: Replace with your filepath
-    df_windows.to_parquet(f'{path_to_save}/train_windows_horizon_{current_horizon}.parquet')
+    df_windows.to_parquet(f'{path_to_save}/windows_horizon_{current_horizon}.parquet')
     print(f"Saved windows for horizon {current_horizon} to parquet files.")
     print("--------------------------------------------------")
     print()

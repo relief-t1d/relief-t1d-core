@@ -153,7 +153,7 @@ print()
 
 try:
 
-    def read_windows_2025(horizon, df_train, df_val, df_test):
+    def read_windows(horizon, df_train, df_val, df_test):
         # ##### TRAINING SET #####
         train_unique_patient_ids = df_train['patient_id'].unique()
         print(f"Unique patient IDs in training set: {len(train_unique_patient_ids)}")
@@ -728,13 +728,16 @@ try:
                 start_time_testing = time.time()
 
                 if current_algorithm == 'Linear':  # load linear model
-                    model_load = prepare_model_linear(history_length, weights=f"models/{current_name}.weights.h5")
+                    model_load = prepare_model_linear(history_length,
+                                                      weights=f"models/{current_name}.weights.h5")
 
                 elif current_algorithm == 'LSTM':  # load LSTM model
-                    model_load = prepare_model_LSTM(history_length, weights=f"models/{current_name}.weights.h5")
+                    model_load = prepare_model_LSTM(history_length,
+                                                    weights=f"models/{current_name}.weights.h5")
 
                 else:  # load CNN model
-                    model_load = prepare_model_CNN(history_length, weights=f"models/{current_name}.weights.h5")
+                    model_load = prepare_model_CNN(history_length,
+                                                   weights=f"models/{current_name}.weights.h5")
 
                 bg_predict = model_load.predict(x_test)
 
