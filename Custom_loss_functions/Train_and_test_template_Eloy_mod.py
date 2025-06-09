@@ -42,7 +42,7 @@ def EloyPenaltyMSEp06(y_true, y_pred):
     return Eloy_Penalty(y_true, y_pred, p=0.6) * MSE(y_true, y_pred)
 
 
-loss_function_name = "RMSE"  # default loss function
+# loss_function_name = "RMSE"  # default loss function
 
 loss_functions_dic = {"EloyPenaltyp01": EloyPenaltyp01,  # c_sig (documento: Clarke Sigmoid-shaped Cost Function (C-Sig)
                       "EloyPenaltyp06": EloyPenaltyp06,
@@ -56,9 +56,9 @@ loss_functions_dic = {"EloyPenaltyp01": EloyPenaltyp01,  # c_sig (documento: Cla
                       "EloyPenaltyMSEp06": EloyPenaltyMSEp06,
                       }
 
-loss_function = loss_functions_dic[loss_function_name]
-print("INFO: loss_function = ", loss_function)
-print("INFO: loss_function_name = ", loss_function_name)
+# loss_function = loss_functions_dic[loss_function_name]
+# print("INFO: loss_function = ", loss_function)
+# print("INFO: loss_function_name = ", loss_function_name)
 
 # Set seeds for reproducibility
 np.random.seed(42)
@@ -83,6 +83,7 @@ do_cross_validation = False  # If True, it will use the cross-validation folds i
 
 horizons = [2, 4, 6, 8, 12, 16]
 algorithms = ['CNN', 'LSTM', 'Linear']
+loss_function_name_list = ['RMSE', 'EloyPenaltyp01', 'EloyPenaltyp06', 'gMSEitaliana', 'SEG', 'SEGmse', 'gMADitaliana', 'EloyPenaltyMSEp01', 'EloyPenaltyMSEp06']
 
 # Sensor reading limits
 maximum_sensor_reading = 500
@@ -263,7 +264,7 @@ try:
             return Model(inputs=[i], outputs=[x])
 
     ## Model Functions ################################################
-    def build_model(model, weights='', loss=loss_function):
+    def build_model(model, weights='', loss_function=loss_functions_dic['RMSE']):
         # build & compile model
         m = model.build()
 
@@ -303,19 +304,19 @@ try:
         callbacks.append(keras.callbacks.CSVLogger(filepath + "_history.csv", separator=',', append=False)) # DUDA: pq hay tanto cambio en la definición de la callback?
         return callbacks
 
-    def prepare_model_LSTM(history_length, nb_hidden_units=128, weights='', loss=loss_function):
+    def prepare_model_LSTM(history_length, nb_hidden_units=128, weights='', loss_function=loss_functions_dic['RMSE']):
         model = LSTMModel(input_shape=(history_length, 1), nb_output_units=1, nb_hidden_units=nb_hidden_units)
-        return build_model(model, weights, loss) # DUDA: si el loss luego en el build_model no se usa, pq se pasa como parámetro?
+        return build_model(model, weights, loss_function)
 
 
-    def prepare_model_linear(history_length, weights='', loss=loss_function):
+    def prepare_model_linear(history_length, weights='', loss_function=loss_functions_dic['RMSE']):
         model = LinearModel(input_shape=(history_length,), nb_output_units=1)
-        return build_model(model, weights, loss) # DUDA: si el loss luego en el build_model no se usa, pq se pasa como parámetro?
+        return build_model(model, weights, loss_function)
 
 
-    def prepare_model_CNN(history_length, weights='', loss=loss_function):
+    def prepare_model_CNN(history_length, weights='', loss_function=loss_functions_dic['RMSE']):
         model = CNNModel(input_shape=(history_length, 1), nb_output_units=1)
-        return build_model(model, weights, loss) # DUDA: si el loss luego en el build_model no se usa, pq se pasa como parámetro?
+        return build_model(model, weights, loss_function)
 
     ############## TRAIN FUNCTION #####################################
     def train(x_train,
@@ -638,185 +639,195 @@ try:
         
     #################################################### TRAIN AND TEST ##########################################################
 
-    for current_horizon in horizons:  # For all horizons -------------------------------------
-        
-        used_columns = [f"x{i}" for i in range(history_length)] + ["y"]  # Columns to be used for training, validation, and testing
+    for loss_function_name in loss_function_name_list:  # For all loss functions -------------------------------------
+        loss_function = loss_functions_dic[loss_function_name]
+        print(f" ----------- Loss function: {loss_function_name} -----------")
 
-        if do_cross_validation:
-            k_folds = 5
-            print(f"Cross-validation enabled with {k_folds} folds.")
+        for current_horizon in horizons:  # For all horizons -------------------------------------
 
-        else:
-            k_folds = 1
-            print("Cross-validation is disabled. Using the first fold for training, validation, and testing.")
+            used_columns = [f"x{i}" for i in range(history_length)] + ["y"]  # Columns to be used for training, validation, and testing
 
-        df = pd.read_parquet(f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet")
+            if do_cross_validation:
+                k_folds = 5
+                print(f"Cross-validation enabled with {k_folds} folds.")
 
-        for current_fold in range(0, k_folds):  # For all folds -------------------------------------
+            else:
+                k_folds = 1
+                print("Cross-validation is disabled. Using the first fold for training, validation, and testing.")
 
-            # Filter the DataFrame for training for the current fold
-            df_train = df[df[f'fold_{current_fold}'] == 'train']
-            patient_number_in_train = df_train['patient_id'].nunique()
-            df_train.reset_index(drop=True, inplace=True)
-            df_train = df_train[used_columns]  # Select only the used columns
+            df = pd.read_parquet(f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet")
 
-            # Filter the DataFrame for validation for the current fold
-            df_val = df[df[f'fold_{current_fold}'] == 'val']
-            patient_number_in_val = df_val['patient_id'].nunique()
-            df_val.reset_index(drop=True, inplace=True)
-            df_val = df_val[used_columns]  # Select only the used columns
+            for current_fold in range(0, k_folds):  # For all folds -------------------------------------
 
-            # Filter the DataFrame for testing for the current fold
-            df_test = df[df[f'fold_{current_fold}'] == 'test']
-            patient_number_in_test = df_test['patient_id'].nunique()
-            df_test.reset_index(drop=True, inplace=True)
-            df_test = df_test[used_columns]  # Select only the used columns
+                # Filter the DataFrame for training for the current fold
+                df_train = df[df[f'fold_{current_fold}'] == 'train']
+                patient_number_in_train = df_train['patient_id'].nunique()
+                df_train.reset_index(drop=True, inplace=True)
+                df_train = df_train[used_columns]  # Select only the used columns
 
-            num_patients = patient_number_in_train + patient_number_in_val + patient_number_in_test
+                # Filter the DataFrame for validation for the current fold
+                df_val = df[df[f'fold_{current_fold}'] == 'val']
+                patient_number_in_val = df_val['patient_id'].nunique()
+                df_val.reset_index(drop=True, inplace=True)
+                df_val = df_val[used_columns]  # Select only the used columns
 
-            print(f"/n---- Fold {current_fold + 1}: -----")
-            print("-- Totals --")
-            print(f"  Train: {patient_number_in_train} patients. Total windows: {len(df_train)}")
-            print(f"  Val:   {patient_number_in_val} patients. Total windows: {len(df_val)}")
-            print(f"  Test:  {patient_number_in_test} patients. Total windows: {len(df_test)}")
+                # Filter the DataFrame for testing for the current fold
+                df_test = df[df[f'fold_{current_fold}'] == 'test']
+                patient_number_in_test = df_test['patient_id'].nunique()
+                df_test.reset_index(drop=True, inplace=True)
+                df_test = df_test[used_columns]  # Select only the used columns
 
-            print("/n -- Percentages --")
-            print(f"Train: {(patient_number_in_train / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_train) / len(df) * 100):.2f}")
-            print(f"Val:   {(patient_number_in_val / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_val) / len(df) * 100):.2f}")
-            print(f"Test:  {(patient_number_in_test / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_test) / len(df) * 100):.2f}")
+                num_patients = patient_number_in_train + patient_number_in_val + patient_number_in_test
 
-            x_train = df_train.iloc[:, :-1].to_numpy()  # Get all columns but the last two
-            y_train = df_train.iloc[:, -1:].to_numpy()  # Get just the one before the last column
+                print(f"/n---- Fold {current_fold + 1}: -----")
+                print("-- Totals --")
+                print(f"  Train: {patient_number_in_train} patients. Total windows: {len(df_train)}")
+                print(f"  Val:   {patient_number_in_val} patients. Total windows: {len(df_val)}")
+                print(f"  Test:  {patient_number_in_test} patients. Total windows: {len(df_test)}")
 
-            x_val = df_val.iloc[:, :-1].to_numpy()  # Get all columns but the last one
-            y_val = df_val.iloc[:, -1:].to_numpy()  # Get just the last column
+                print("/n -- Percentages --")
+                print(f"Train: {(patient_number_in_train / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_train) / len(df) * 100):.2f}")
+                print(f"Val:   {(patient_number_in_val / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_val) / len(df) * 100):.2f}")
+                print(f"Test:  {(patient_number_in_test / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_test) / len(df) * 100):.2f}")
 
-            x_test = df_test.iloc[:, :-1].to_numpy()  # Get all columns but the last two
-            y_test = df_test.iloc[:, -1:].to_numpy()  # Get just the one before the last column
+                x_train = df_train.iloc[:, :-1].to_numpy()  # Get all columns but the last two
+                y_train = df_train.iloc[:, -1:].to_numpy()  # Get just the one before the last column
 
-            del df, df_train, df_val, df_test  # Free memory
+                x_val = df_val.iloc[:, :-1].to_numpy()  # Get all columns but the last one
+                y_val = df_val.iloc[:, -1:].to_numpy()  # Get just the last column
 
-            print()
+                x_test = df_test.iloc[:, :-1].to_numpy()  # Get all columns but the last two
+                y_test = df_test.iloc[:, -1:].to_numpy()  # Get just the one before the last column
 
-            for current_algorithm in algorithms:  # For all models ---------------------------------------
-
-                if current_algorithm == 'Linear':  # prepare linear model
-                    model = prepare_model_linear(history_length)
-                    
-                elif current_algorithm == 'LSTM':  # prepare LSTM model
-                    model = prepare_model_LSTM(history_length)
-                    
-                else:  # prepare CNN model
-                    model = prepare_model_CNN(history_length)
-                
-                current_name = f"{current_algorithm}_H{current_horizon}_{loss_function_name}_Fold{current_fold + 1}"
+                del df, df_train, df_val, df_test  # Free memory
 
                 print()
-                print("######################################################################## - ")
-                print(f'START training {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
-                print()
 
-                # Record the TRAINING start time
-                start_time_training = time.time()
+                for current_algorithm in algorithms:  # For all models ---------------------------------------
 
-                hist, model_trained = train(x_train=x_train,
-                                            y_train=y_train,
-                                            x_val=x_val,
-                                            y_val=y_val,
-                                            model=model,
-                                            history_length=history_length,
-                                            save_filepath=f"models/{current_name}")
+                    if current_algorithm == 'Linear':  # prepare linear model
+                        model = prepare_model_linear(history_length=history_length,
+                                                     loss=loss_function)
 
-                # Record the TRAINING end time
-                end_time_training = time.time()
-                # Calculate the elapsed time of TRAINING
-                training_time = end_time_training - start_time_training                
-                elapsed_for_training = datetime.timedelta(seconds=training_time)
-                
-                print()
-                print(f'END training {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
-                print("########################################################################")
-                print()
-                
-                print(f"Training time for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}: {elapsed_for_training}")
-                print()
+                    elif current_algorithm == 'LSTM':  # prepare LSTM model
+                        model = prepare_model_LSTM(history_length=history_length,
+                                                   loss_function=loss_function)
 
-                print("######################################################################## - ")
-                print(f'START saving logs for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
-                print()
+                    else:  # prepare CNN model
+                        model = prepare_model_CNN(history_length=history_length,
+                                                  loss=loss_function)
 
-                get_train_plots_loss(hist, f"plots/{current_name}")
-                get_train_plots_MSE(hist, f"plots/{current_name}")
+                    current_name = f"{current_algorithm}_H{current_horizon}_{loss_function_name}_Fold{current_fold + 1}"
 
-                df_hist = pd.DataFrame(data=hist.history)
-                df_hist.to_csv(f'hist/df_hist_{current_name}.csv')
+                    print()
+                    print("######################################################################## - ")
+                    print(f'START training {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
+                    print()
 
-                hist_best = df_hist.iloc[df_hist['loss'].idxmin()]
-                hist_best['epoch'] = df_hist.shape[0]
-                hist_best.to_csv(f'hist/hist_best_{current_name}.csv')
-                
-                print(f'END saving logs for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
-                print("########################################################################")
-                print()
+                    # Record the TRAINING start time
+                    start_time_training = time.time()
 
-                # ## TESTING ################################
+                    hist, model_trained = train(x_train=x_train,
+                                                y_train=y_train,
+                                                x_val=x_val,
+                                                y_val=y_val,
+                                                model=model,
+                                                history_length=history_length,
+                                                save_filepath=f"models/{current_name}")
 
-                print("######################################################################## - ")
-                print(f'START testing for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
-                print()
+                    # Record the TRAINING end time
+                    end_time_training = time.time()
+                    # Calculate the elapsed time of TRAINING
+                    training_time = end_time_training - start_time_training
+                    elapsed_for_training = datetime.timedelta(seconds=training_time)
 
-                # Record the TEST start time
-                start_time_testing = time.time()
+                    print()
+                    print(f'END training {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
+                    print("########################################################################")
+                    print()
 
-                if current_algorithm == 'Linear':  # load linear model
-                    model_load = prepare_model_linear(history_length,
-                                                      weights=f"models/{current_name}.weights.h5")
-                                                      
-                elif current_algorithm == 'LSTM':  # load LSTM model
-                    model_load = prepare_model_LSTM(history_length,
-                                                    weights=f"models/{current_name}.weights.h5")
-                                                    
-                else:  # load CNN model
-                    model_load = prepare_model_CNN(history_length,
-                                                   weights=f"models/{current_name}.weights.h5")
+                    print(f"Training time for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}: {elapsed_for_training}")
+                    print()
 
-                bg_predict = model_load.predict(x_test)
+                    print("######################################################################## - ")
+                    print(f'START saving logs for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
+                    print()
 
-                # Record the TEST end time
-                end_time_testing = time.time()
-                
-                # Calculate the elapsed time of TEST
-                testing_time = end_time_testing - start_time_testing
-                
-                # Convertir a timedelta
-                elapsed_testing = datetime.timedelta(seconds=testing_time)
+                    get_train_plots_loss(hist, f"plots/{current_name}")
+                    get_train_plots_MSE(hist, f"plots/{current_name}")
 
-                print()
-                print(f"Testing time for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}: {elapsed_testing}")
+                    df_hist = pd.DataFrame(data=hist.history)
+                    df_hist.to_csv(f'hist/df_hist_{current_name}.csv')
 
-                print()
-                print(f'Test results for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1} - DONE')
-                print()
+                    hist_best = df_hist.iloc[df_hist['loss'].idxmin()]
+                    hist_best['epoch'] = df_hist.shape[0]
+                    hist_best.to_csv(f'hist/hist_best_{current_name}.csv')
 
-                # Save predictions and references
-                df_test_results = pd.DataFrame({'y_test': y_test.ravel(), 'y_predict': bg_predict.ravel()})
-                df_test_results.to_parquet(f'test_results/df_test_results_vectors_{current_name}.parquet')
-                
-                df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results,
-                                                                               f'_{current_name}')
-                df_metrics_by_range = df_metrics_by_range.round(2)
-                df_metrics_by_range.to_csv(f'test_results/metrics_performance_by_range_{current_name}.csv',
-                                           index=False)
-                
-                df_zone_values.to_csv(f'test_results/number_of points_by_zones_{current_name}.csv',
-                                      index=False)
+                    print(f'END saving logs for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
+                    print("########################################################################")
+                    print()
 
-                df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_name}.csv',
-                                 index=False)
-                
-                print(f'Test results of {current_algorithm} - Prediction Horizon={current_horizon} - - Loss Function={loss_function_name} - Fold={current_fold + 1} - DONE')
-                print('____________________________________________________________________________')
-                print()
+                    # ## TESTING ################################
+
+                    print("######################################################################## - ")
+                    print(f'START testing for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}')
+                    print()
+
+                    # Record the TEST start time
+                    start_time_testing = time.time()
+
+                    if current_algorithm == 'Linear':  # load linear model
+                        model_load = prepare_model_linear(history_length,
+                                                          loss_function=loss_function,
+                                                          weights=f"models/{current_name}.weights.h5")
+
+                    elif current_algorithm == 'LSTM':  # load LSTM model
+                        model_load = prepare_model_LSTM(history_length,
+                                                        loss_function=loss_function,
+                                                        weights=f"models/{current_name}.weights.h5")
+
+                    else:  # load CNN model
+                        model_load = prepare_model_CNN(history_length,
+                                                       loss_function=loss_function,
+                                                       weights=f"models/{current_name}.weights.h5")
+
+                    bg_predict = model_load.predict(x_test)
+
+                    # Record the TEST end time
+                    end_time_testing = time.time()
+
+                    # Calculate the elapsed time of TEST
+                    testing_time = end_time_testing - start_time_testing
+
+                    # Convertir a timedelta
+                    elapsed_testing = datetime.timedelta(seconds=testing_time)
+
+                    print()
+                    print(f"Testing time for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1}: {elapsed_testing}")
+
+                    print()
+                    print(f'Test results for {current_algorithm} - Prediction Horizon={current_horizon} - Loss Function={loss_function_name} - Fold={current_fold + 1} - DONE')
+                    print()
+
+                    # Save predictions and references
+                    df_test_results = pd.DataFrame({'y_test': y_test.ravel(), 'y_predict': bg_predict.ravel()})
+                    df_test_results.to_parquet(f'test_results/df_test_results_vectors_{current_name}.parquet')
+
+                    df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results,
+                                                                                   f'_{current_name}')
+                    df_metrics_by_range = df_metrics_by_range.round(2)
+                    df_metrics_by_range.to_csv(f'test_results/metrics_performance_by_range_{current_name}.csv',
+                                               index=False)
+
+                    df_zone_values.to_csv(f'test_results/number_of points_by_zones_{current_name}.csv',
+                                          index=False)
+
+                    df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_name}.csv',
+                                     index=False)
+
+                    print(f'Test results of {current_algorithm} - Prediction Horizon={current_horizon} - - Loss Function={loss_function_name} - Fold={current_fold + 1} - DONE')
+                    print('____________________________________________________________________________')
+                    print()
 finally:
     sys.stdout.close()
     sys.stderr.close()
