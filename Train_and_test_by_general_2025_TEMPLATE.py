@@ -610,9 +610,8 @@ try:
             k_folds = 1
             print("Cross-validation is disabled. Using the first fold for training, validation, and testing.")
 
-        df = pd.read_parquet(f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet")
-
         for current_fold in range(0, k_folds):  # For all folds -------------------------------------
+            df = pd.read_parquet(f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet")
 
             # Filter the DataFrame for training for the current fold
             df_train = df[df[f'fold_{current_fold}'] == 'train']
