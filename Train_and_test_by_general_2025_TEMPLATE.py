@@ -32,17 +32,17 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 batch_size = 4096
 patience = 10
 max_epoch = 500
-dropout = 0.0  # Dropout for LSTM layers
+dropout = 0.1  # Dropout for LSTM layers
 recurrent_dropout = 0.0  # Dropout rate for LSTM layers
 
 # Path to the windows data (must include final slash)
-windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/all_folds/'
+windows_path = 'path/to/windows/data/'  # e.g., 'C:/users/user1/windows/'
 
 history_length = 8  # 2h
 
-do_cross_validation = False  # If True, it will use the cross-validation folds in the dataset
+do_cross_validation = True  # If True, it will use the cross-validation folds in the dataset
 
-horizons = [2, 4, 6, 8, 12, 16]
+horizons = [2, 4]
 algorithms = ['Linear', 'LSTM', 'CNN']
 
 # Sensor reading limits
