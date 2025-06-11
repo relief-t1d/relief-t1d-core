@@ -1,3 +1,7 @@
+# This script creates patient-wise cross-validation folds for a dataset of T1D windows.
+# The split proportions are approximately 70% train, 10% validation, and 20% test.
+# Current script is design to make 5 folds
+
 import pandas as pd
 import os
 import random
@@ -10,9 +14,6 @@ Fold = Dict[str, List[str]]  # {'train': [...], 'val': [...], 'test': [...]}
 path_read_data = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/no_split_2025_DiaTrend/'
 path_to_save_folds = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/folds_deduplicated_intra_patient_balanced_splits/'
 horizon_list = [2, 4]
-number_of_folds = 5
-validation_fraction = 0.125  # 12.5% of remaining windows go to validation
-
 
 # Functions -------------------------
 def make_folds_greedy_splits_valanced_priority(patient_windows: Dict[str, int],
@@ -106,81 +107,6 @@ def make_folds_greedy_splits_valanced_priority(patient_windows: Dict[str, int],
         })
 
     return folds
-
-
-# def make_folds_greedy_splits(patient_windows: Dict[str, int],
-#                              k: int = 5,
-#                              val_frac: float = 0.10,
-#                              seed: int = 42) -> List[Fold]:
-#     """
-#     Distributes patients across k folds such that each fold has a balanced number of total windows in its test set.
-#     Then, for each fold, assigns the remaining patients to train and validation sets, trying to preserve window balance.
-#
-#     Parameters:
-#     - patient_windows: dict with patient ID (str) as key and number of training windows (int) as value.
-#     - k: number of folds to generate.
-#     - val_frac: fraction (0-1) of remaining windows to allocate to validation in each fold.
-#     - seed: random seed for reproducibility.
-#
-#     Returns:
-#     - List of k folds, each a dictionary with 'train', 'val', 'test' patient ID lists.
-#     """
-#     rng = random.Random(seed)  # Controlled random generator for reproducibility
-#
-#     # Convert patient dict to list of (id, window_count) pairs
-#     items = list(patient_windows.items())
-#     rng.shuffle(items)  # Shuffle to break ties fairly between patients with equal window counts
-#     items.sort(key=lambda x: x[1], reverse=True)  # Sort by descending number of windows
-#
-#     # Step 1: Assign test patients to folds by balancing total number of windows using greedy strategy
-#     test_folds: List[List[str]] = [[] for _ in range(k)]
-#     fold_load: List[int] = [0] * k  # Keeps track of window total for each fold
-#
-#     for current_patient_id, current_patient_number_of_windows in items:
-#         # Find the fold with the smallest current load and assign the patient there
-#         idx = fold_load.index(min(fold_load))
-#         test_folds[idx].append(current_patient_id)
-#         fold_load[idx] += current_patient_number_of_windows
-#
-#     # Step 2: For each fold, assign the remaining patients to train and val, also attempting to balance window volume
-#     all_patient_ids = list(patient_windows.keys())
-#     folds: List[Fold] = []
-#
-#     for i in range(k):
-#         test_ids = set(test_folds[i])
-#         remaining_ids = [patient_id for patient_id in all_patient_ids if patient_id not in test_ids]
-#
-#         # Sort remaining by descending window count (with shuffle before to break ties randomly)
-#         rng.shuffle(remaining_ids)
-#         remaining_items = [(patient_id, patient_windows[patient_id]) for patient_id in remaining_ids]
-#         remaining_items.sort(key=lambda x: x[1], reverse=True)
-#
-#         # Target total for validation windows
-#         total_remaining_windows = sum(count for _, count in remaining_items)
-#         target_val_windows = val_frac * total_remaining_windows
-#
-#         val_ids, train_ids = [], []
-#         val_total, train_total = 0, 0
-#
-#         # Assign patients to validation until target reached, then assign to train
-#         for j, (pid, count) in enumerate(remaining_items):
-#             if val_total < target_val_windows:
-#                 val_ids.append(pid)
-#                 val_total += count
-#             else:
-#                 break
-#
-#         train_ids = [pid for pid, _ in remaining_items[j:]]
-#
-#         # Store the fold split
-#         folds.append({
-#             'train': sorted(train_ids),
-#             'val': sorted(val_ids),
-#             'test': sorted(test_folds[i])
-#         })
-#
-#     return folds
-
 
 def validate_folds(folds: List[Fold], patient_measurements: Dict[str, int], tolerance_pct: float = 10.0,
                    horizon: int = 2) -> None:
@@ -339,7 +265,6 @@ for horizon in horizon_list:
 
     # Create folds using the greedy split function
     folds_split = make_folds_greedy_splits_valanced_priority(patient_number_windows_dict,
-                                                             k=number_of_folds,
                                                              seed=42)
 
     # Print statistics of the folds created
