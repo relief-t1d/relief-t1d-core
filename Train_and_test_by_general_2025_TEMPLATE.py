@@ -31,12 +31,12 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 ###################### CONFIG EXPERIMENT #############################
 batch_size = 4096
 patience = 10
-max_epoch = 500
-dropout = 0.1  # Dropout for LSTM layers
+max_epoch = 2
+dropout = 0.0  # Dropout for LSTM layers
 recurrent_dropout = 0.0  # Dropout rate for LSTM layers
 
 # Path to the windows data (must include final slash)
-windows_path = 'path/to/windows/data/'  # e.g., 'C:/users/user1/windows/'
+windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/folds_deduplicated_intra_patient_balanced_splits_DiaTrend/'  # e.g., 'C:/users/user1/windows/'
 
 history_length = 8  # 2h
 
@@ -610,65 +610,65 @@ try:
             k_folds = 1
             print("Cross-validation is disabled. Using the first fold for training, validation, and testing.")
 
-        for current_fold in range(0, k_folds):  # For all folds -------------------------------------
-            df = pd.read_parquet(f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet")
+        results_vector_list = []
 
-            # Filter the DataFrame for training for the current fold
-            df_train = df[df[f'fold_{current_fold}'] == 'train']
-            patient_number_in_train = df_train['patient_id'].nunique()
-            df_train.reset_index(drop=True, inplace=True)
-            df_train = df_train[used_columns]  # Select only the used columns
+        for current_algorithm in algorithms:  # For all models ---------------------------------------
 
-            # Filter the DataFrame for validation for the current fold
-            df_val = df[df[f'fold_{current_fold}'] == 'val']
-            patient_number_in_val = df_val['patient_id'].nunique()
-            df_val.reset_index(drop=True, inplace=True)
-            df_val = df_val[used_columns]  # Select only the used columns
+            if current_algorithm == 'Linear':  # prepare linear model
+                model = prepare_model_linear(history_length)
 
-            # Filter the DataFrame for testing for the current fold
-            df_test = df[df[f'fold_{current_fold}'] == 'test']
-            patient_number_in_test = df_test['patient_id'].nunique()
-            df_test.reset_index(drop=True, inplace=True)
-            df_test = df_test[used_columns]  # Select only the used columns
+            elif current_algorithm == 'LSTM':  # prepare LSTM model
+                model = prepare_model_LSTM(history_length)
 
-            num_patients = patient_number_in_train + patient_number_in_val + patient_number_in_test
+            else:  # prepare CNN model
+                model = prepare_model_CNN(history_length)
 
-            print(f"/n---- Fold {current_fold + 1}: -----")
-            print("-- Totals --")
-            print(f"  Train: {patient_number_in_train} patients. Total windows: {len(df_train)}")
-            print(f"  Val:   {patient_number_in_val} patients. Total windows: {len(df_val)}")
-            print(f"  Test:  {patient_number_in_test} patients. Total windows: {len(df_test)}")
-
-            print("/n -- Percentages --")
-            print(f"Train: {(patient_number_in_train / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_train) / len(df) * 100):.2f}")
-            print(f"Val:   {(patient_number_in_val / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_val) / len(df) * 100):.2f}")
-            print(f"Test:  {(patient_number_in_test / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_test) / len(df) * 100):.2f}")
-
-            x_train = df_train.iloc[:, :-1].to_numpy()  # Get all columns but the last two
-            y_train = df_train.iloc[:, -1:].to_numpy()  # Get just the one before the last column
-
-            x_val = df_val.iloc[:, :-1].to_numpy()  # Get all columns but the last one
-            y_val = df_val.iloc[:, -1:].to_numpy()  # Get just the last column
-
-            x_test = df_test.iloc[:, :-1].to_numpy()  # Get all columns but the last two
-            y_test = df_test.iloc[:, -1:].to_numpy()  # Get just the one before the last column
-
-            del df, df_train, df_val, df_test  # Free memory
-
-            print()
-
-            for current_algorithm in algorithms:  # For all models ---------------------------------------
-
-                if current_algorithm == 'Linear':  # prepare linear model
-                    model = prepare_model_linear(history_length)
-                    
-                elif current_algorithm == 'LSTM':  # prepare LSTM model
-                    model = prepare_model_LSTM(history_length)
-                    
-                else:  # prepare CNN model
-                    model = prepare_model_CNN(history_length)
-
+            for current_fold in range(0, k_folds):  # For all folds -------------------------------------
                 current_name = f"{current_algorithm}_H{current_horizon}_Fold{current_fold + 1}"
+
+                df = pd.read_parquet(f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet")
+
+                # Filter the DataFrame for training for the current fold
+                df_train = df[df[f'fold_{current_fold}'] == 'train']
+                patient_number_in_train = df_train['patient_id'].nunique()
+                df_train.reset_index(drop=True, inplace=True)
+                df_train = df_train[used_columns]  # Select only the used columns
+
+                # Filter the DataFrame for validation for the current fold
+                df_val = df[df[f'fold_{current_fold}'] == 'val']
+                patient_number_in_val = df_val['patient_id'].nunique()
+                df_val.reset_index(drop=True, inplace=True)
+                df_val = df_val[used_columns]  # Select only the used columns
+
+                # Filter the DataFrame for testing for the current fold
+                df_test = df[df[f'fold_{current_fold}'] == 'test']
+                patient_number_in_test = df_test['patient_id'].nunique()
+                df_test.reset_index(drop=True, inplace=True)
+                df_test = df_test[used_columns]  # Select only the used columns
+
+                num_patients = patient_number_in_train + patient_number_in_val + patient_number_in_test
+
+                print(f"\n---- Fold {current_fold + 1}: -----")
+                print("-- Totals --")
+                print(f"  Train: {patient_number_in_train} patients. Total windows: {len(df_train)}")
+                print(f"  Val:   {patient_number_in_val} patients. Total windows: {len(df_val)}")
+                print(f"  Test:  {patient_number_in_test} patients. Total windows: {len(df_test)}")
+
+                print("\n -- Percentages --")
+                print(f"Train: {(patient_number_in_train / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_train) / len(df) * 100):.2f}")
+                print(f"Val:   {(patient_number_in_val / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_val) / len(df) * 100):.2f}")
+                print(f"Test:  {(patient_number_in_test / num_patients * 100):.2f} Percentage of patients. Percentage of windows: {(len(df_test) / len(df) * 100):.2f}")
+
+                x_train = df_train.iloc[:, :-1].to_numpy()  # Get all columns but the last two
+                y_train = df_train.iloc[:, -1:].to_numpy()  # Get just the one before the last column
+
+                x_val = df_val.iloc[:, :-1].to_numpy()  # Get all columns but the last one
+                y_val = df_val.iloc[:, -1:].to_numpy()  # Get just the last column
+
+                x_test = df_test.iloc[:, :-1].to_numpy()  # Get all columns but the last two
+                y_test = df_test.iloc[:, -1:].to_numpy()  # Get just the one before the last column
+
+                del df, df_train, df_val, df_test  # Free memory
 
                 print()
                 print("######################################################################## - ")
@@ -760,22 +760,35 @@ try:
                 # Save predictions and references
                 df_test_results = pd.DataFrame({'y_test': y_test.ravel(), 'y_predict': bg_predict.ravel()})
                 df_test_results.to_parquet(f'test_results/df_test_results_vectors_{current_name}.parquet')
-                
-                df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results,
-                                                                               f'_{current_name}')
-                df_metrics_by_range = df_metrics_by_range.round(2)
-                df_metrics_by_range.to_csv(f'test_results/metrics_performance_by_range_{current_name}.csv',
-                                           index=False)
-                
-                df_zone_values.to_csv(f'test_results/number_of points_by_zones_{current_name}.csv',
-                                      index=False)
 
-                df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_name}.csv',
-                                 index=False)
+                results_vector_list.append(df_test_results)
+                
 
-                print(f'Test results of {current_algorithm} - Prediction Horizon={current_horizon} - Fold={current_fold + 1} - DONE')
-                print('____________________________________________________________________________')
-                print()
+            # Concatenate all results for the current algorithm
+            df_test_results = pd.concat(results_vector_list, ignore_index=True)
+
+            # Save the concatenated results
+            df_test_results.to_parquet(f'test_results/df_test_results_vectors_{current_algorithm}_H{current_horizon}.parquet')
+
+            print(f'Metrics for {current_algorithm} - Prediction Horizon={current_horizon} - All folds aggregated')
+
+            print(f"Total test results for {current_algorithm} - Prediction Horizon={current_horizon}: {len(df_test_results)} rows")
+
+            df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results,
+                                                                       f'_{current_algorithm}_H{current_horizon}')
+            df_metrics_by_range = df_metrics_by_range.round(2)
+            df_metrics_by_range.to_csv(f'test_results/metrics_performance_by_range_{current_algorithm}_H{current_horizon}.csv',
+                                   index=False)
+
+            df_zone_values.to_csv(f'test_results/number_of points_by_zones_{current_algorithm}_H{current_horizon}.csv',
+                              index=False)
+
+            df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_algorithm}_H{current_horizon}.csv',
+                         index=False)
+
+            print(f'Test results of {current_algorithm} - Prediction Horizon={current_horizon}  ALL FOLDS - DONE')
+            print('____________________________________________________________________________')
+            print()
 finally:
     sys.stdout.close()
     sys.stderr.close()
