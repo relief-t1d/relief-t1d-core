@@ -18,6 +18,7 @@ import platform
 import socket
 import psutil
 import subprocess
+
 # ----------------------- End imports -----------------------
 
 # Set seeds for reproducibility
@@ -35,7 +36,7 @@ dropout = 0.0  # Dropout for LSTM layers
 recurrent_dropout = 0.0  # Dropout rate for LSTM layers
 
 # Path to the windows data (must include final slash)
-windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/folds_deduplicated_intra_patient_balanced_splits_DiaTrend/'  # e.g., 'C:/users/user1/windows/'
+windows_path = '/home/cirorodriguezleon/RELIEF-T1D/datasets/all_folds_deduplicated_intra_patient_val_greedy/'
 
 history_length = 8  # 2h
 
@@ -57,6 +58,7 @@ folders = ["hist", "models", "plots", "test_results"]
 for folder in folders:
     if not os.path.exists(folder):
         os.makedirs(folder)
+
 
 class Tee(object):
     def __init__(self, *files):
@@ -87,6 +89,7 @@ original_stderr = sys.stderr
 sys.stdout = Tee(sys.stdout, log_file)
 sys.stderr = Tee(sys.stderr, log_file)
 
+
 # ----------------------- Print the system information -----------------------
 
 def log_experiment_info():
@@ -103,9 +106,9 @@ def log_experiment_info():
     print(f"CPU Cores        : {psutil.cpu_count(logical=False)} physical / {psutil.cpu_count()} logical")
 
     ram = psutil.virtual_memory()
-    print(f"RAM Total        : {round(ram.total / (1024**3), 2)} GB")
-    print(f"RAM Available    : {round(ram.available / (1024**3), 2)} GB")
-    print(f"RAM Used         : {round(ram.used / (1024**3), 2)} GB")
+    print(f"RAM Total        : {round(ram.total / (1024 ** 3), 2)} GB")
+    print(f"RAM Available    : {round(ram.available / (1024 ** 3), 2)} GB")
+    print(f"RAM Used         : {round(ram.used / (1024 ** 3), 2)} GB")
     print(f"RAM Usage (%)    : {ram.percent}%")
 
     print("/n🐍 Python & Libraries")
@@ -186,6 +189,7 @@ try:
             x = Dense(self.nb_output_units, activation=None)(x)
             return Model(inputs=[i], outputs=[x])
 
+
     # Linear
     class LinearModel:
         def __init__(self, input_shape, nb_output_units):
@@ -200,6 +204,7 @@ try:
             x = Dense(self.nb_output_units, activation=None)(i)
 
             return Model(inputs=[i], outputs=[x])
+
 
     # CNN
     class CNNModel:
@@ -222,12 +227,14 @@ try:
 
             return Model(inputs=[i], outputs=[x])
 
+
     ## Model Functions ################################################
     def RMSE(output, target):
         output = tf.cast(output, 'float32')
         target = tf.cast(target, 'float32')
 
         return tf.sqrt(tf.reduce_mean((output - target) ** 2))
+
 
     def build_model(model,
                     weights=''):
@@ -259,6 +266,7 @@ try:
                                        verbose=1))
         return callbacks
 
+
     def prepare_model_LSTM(history_length,
                            nb_hidden_units=128,
                            weights=''):
@@ -275,6 +283,7 @@ try:
     def prepare_model_CNN(history_length, weights=''):
         model = CNNModel(input_shape=(history_length, 1), nb_output_units=1)
         return build_model(model, weights)
+
 
     ############## TRAIN FUNCTION #####################################
     def train(x_train,
@@ -300,6 +309,7 @@ try:
                          )
 
         return hist, model
+
 
     #################################################### TRAIN AND TEST ##########################################################
 

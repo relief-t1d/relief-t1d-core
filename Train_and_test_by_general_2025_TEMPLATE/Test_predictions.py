@@ -94,9 +94,9 @@ def clarke_error_grid(ref_values,
         plt.gca().set_facecolor('white')
 
         # Set axes lengths
-        plt.gca().set_xlim([0, maximum_sensor_reading])
-        plt.gca().set_ylim([0, maximum_sensor_reading])
-        plt.gca().set_aspect((maximum_sensor_reading) / (maximum_sensor_reading))
+        plt.gca().set_xlim([0, 500])
+        plt.gca().set_ylim([0, 500])
+        plt.gca().set_aspect((500) / (500))
 
         # Plot zone lines
         plt.plot([0, 500], [0, 500], ':', c='black', linewidth=1)  # Theoretical 45 regression line
@@ -122,28 +122,16 @@ def clarke_error_grid(ref_values,
         plt.plot([130, 180], [0, 70], '-', c='black', linewidth=1)
 
         # Add zone titles
-        if maximum_sensor_reading <= 405:
-            plt.text(30, 15, "A", fontsize=15, fontweight='bold')
-            plt.text(350, 220, "B", fontsize=15, fontweight='bold')
-            plt.text(220, 325, "B", fontsize=15, fontweight='bold')
-            plt.text(120, 325, "C", fontsize=15, fontweight='bold')
-            plt.text(155, 15, "C", fontsize=15, fontweight='bold')
-            plt.text(30, 120, "D", fontsize=15, fontweight='bold')
-            plt.text(325, 120, "D", fontsize=15, fontweight='bold')
-            plt.text(30, 300, "E", fontsize=15, fontweight='bold')
-            plt.text(275, 15, "E", fontsize=15, fontweight='bold')
 
-        else:   # sensor range is greater than 401
-            plt.text(30, 15, "A", fontsize=15, fontweight='bold')
-            plt.text(400, 250, "B", fontsize=15, fontweight='bold')
-            plt.text(270, 400, "B", fontsize=15, fontweight='bold')
-            plt.text(150, 400, "C", fontsize=15, fontweight='bold')
-            plt.text(155, 15, "C", fontsize=15, fontweight='bold')
-            plt.text(30, 120, "D", fontsize=15, fontweight='bold')
-            plt.text(370, 120, "D", fontsize=15, fontweight='bold')
-            plt.text(30, 340, "E", fontsize=15, fontweight='bold')
-            plt.text(370, 15, "E", fontsize=15, fontweight='bold')
-
+        plt.text(30, 15, "A", fontsize=15, fontweight='bold')
+        plt.text(400, 250, "B", fontsize=15, fontweight='bold')
+        plt.text(270, 400, "B", fontsize=15, fontweight='bold')
+        plt.text(150, 400, "C", fontsize=15, fontweight='bold')
+        plt.text(155, 15, "C", fontsize=15, fontweight='bold')
+        plt.text(30, 120, "D", fontsize=15, fontweight='bold')
+        plt.text(370, 120, "D", fontsize=15, fontweight='bold')
+        plt.text(30, 340, "E", fontsize=15, fontweight='bold')
+        plt.text(370, 15, "E", fontsize=15, fontweight='bold')
 
         plt.savefig(f'plots/Clarke_Error_Grid{title_string}.png', dpi=350, bbox_inches='tight')
 
@@ -346,27 +334,29 @@ def get_train_plots_MSE(hist: keras.callbacks, name: str):
     fig.savefig(name + '_MSE.pdf', dpi=350, bbox_inches='tight')
 
 
-# path_predictions = 'c:/Users/Ciro/Mi Unidad (PDI)/_UGR_PDI_2024-05-30/RELIEF-T1D/Python_projects/Glucose_prediction_2025/Custom_loss_functions/Exp1/test_results/df_test_results_vectors_CNN_H2_EloyPenaltyp01_Fold1.parquet'
-path_predictions = 'test_results/df_test_results_vectors_LSTM_H2.parquet'
+if __name__ == "__main__":
 
-df_test_results = pd.read_parquet(path_predictions)
+    # path_predictions = 'c:/Users/Ciro/Mi Unidad (PDI)/_UGR_PDI_2024-05-30/RELIEF-T1D/Python_projects/Glucose_prediction_2025/Custom_loss_functions/Exp1/test_results/df_test_results_vectors_CNN_H2_EloyPenaltyp01_Fold1.parquet'
+    path_predictions = 'test_results/df_test_results_vectors_LSTM_H2.parquet'
 
-current_algorithm = 'CNN_500'  # Change this to the algorithm you are using
-current_horizon = 2  # Change this to the horizon you are using
-minimum_sensor_reading = 38.96  # Minimum sensor reading limit
-maximum_sensor_reading = 401  # Maximum sensor reading limit
+    df_test_results = pd.read_parquet(path_predictions)
 
-df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results,
-                                                                           f'_{current_algorithm}_H{current_horizon}',
-                                                                           minimum_sensor_reading,
-                                                                           maximum_sensor_reading)
-df_metrics_by_range = df_metrics_by_range.round(2)
+    current_algorithm = 'CNN_500'  # Change this to the algorithm you are using
+    current_horizon = 2  # Change this to the horizon you are using
+    minimum_sensor_reading = 38.96  # Minimum sensor reading limit
+    maximum_sensor_reading = 401  # Maximum sensor reading limit
 
-df_metrics_by_range.to_csv(f'test_results/metrics_performance_by_range_{current_algorithm}_H{current_horizon}.csv',
-                       index=False)
+    df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results,
+                                                                               f'_{current_algorithm}_H{current_horizon}',
+                                                                               minimum_sensor_reading,
+                                                                               maximum_sensor_reading)
+    df_metrics_by_range = df_metrics_by_range.round(2)
 
-df_zone_values.to_csv(f'test_results/number_of points_by_zones_{current_algorithm}_H{current_horizon}.csv',
-                  index=False)
+    df_metrics_by_range.to_csv(f'test_results/metrics_performance_by_range_{current_algorithm}_H{current_horizon}.csv',
+                           index=False)
 
-df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_algorithm}_H{current_horizon}.csv',
-             index=False)
+    df_zone_values.to_csv(f'test_results/number_of points_by_zones_{current_algorithm}_H{current_horizon}.csv',
+                      index=False)
+
+    df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_algorithm}_H{current_horizon}.csv',
+                 index=False)
