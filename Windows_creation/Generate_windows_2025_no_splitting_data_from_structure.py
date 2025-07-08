@@ -1,12 +1,18 @@
-import pickle
 import numpy as np
 import pandas as pd
 import os
 
-df_data = pd.read_parquet('c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/Datasets/DiaTrend/Glucose_measurements_v3_DiaTrend.parquet')
+# Load the dataset
+path_to_load_data = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/Datasets/DiaTrend/Glucose_measurements_v3_DiaTrend.parquet'
+df_data = pd.read_parquet(path_to_load_data)
 
 # Filter valid rows (15min is not NaT)
 df_valid_rows = df_data[df_data['15min'].notna()]
+
+# Sort columns by 'Patient_ID' and '15min'
+df_valid_rows.loc[:, 'Patient_ID'] = df_valid_rows['Patient_ID'].astype(int)  # Ensure Patient_ID is int type
+df_valid_rows = df_valid_rows.sort_values(by=['Patient_ID', '15min'])
+df_valid_rows.reset_index(drop=True, inplace=True)  # Reset index after filtering
 
 # Group by 'Patient_ID' and convert 'Measurement' to numpy array
 patient_dict = {
@@ -17,13 +23,13 @@ print(f"Number of patients with valid data: {len(patient_dict)}")
 
 # Windows creation parameters
 history_length = 8  # 120 min
-horizons = [2, 4]  # 2 for 30 min, 4 for 60 min, etc.
+horizons = [2, 4]  # 2 for 30 min, 4 for 60 min
 deduplicate_intra_patient = True  # Remove duplicated instances in a patient
 
-path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/no_split_2025_DiaTrend/'
-if not os.path.exists(path):
-    # Si no existe, crearlo
-    os.makedirs(path)
+path_to_save_windows = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/no_split_2025_DiaTrend_V3/'
+if not os.path.exists(path_to_save_windows):
+    # If it does not exist, create it
+    os.makedirs(path_to_save_windows)
 
 
 # Auxiliary function
@@ -86,7 +92,7 @@ for current_horizon in horizons:
                                                    deduplicate_intra_patient=deduplicate_intra_patient)
 
     # NOTE: Replace with your filepath
-    df_windows.to_parquet(f'{path}/windows_horizon_{current_horizon}.parquet')
+    df_windows.to_parquet(f'{path_to_save_windows}/windows_horizon_{current_horizon}.parquet')
     print(f"Saved windows for horizon {current_horizon} to parquet files.")
     print("--------------------------------------------------")
     print()
