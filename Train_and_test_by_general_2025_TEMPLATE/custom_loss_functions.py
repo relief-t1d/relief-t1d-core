@@ -9,25 +9,17 @@ import tensorflow as tf
 # ------------------------------------------
 # Funciones Básicas (Operaciones TensorFlow)
 # ------------------------------------------
-def sigmoide(x, centro, pendiente):
+def sigmoid(x, centro, pendiente):
     """Función sigmoide para Clinical_Penalty."""
     return 1.0 / (1.0 + tf.exp(-pendiente * (x - centro)))
-
-# ------------------------------------------
-# Métricas/Funciones de Pérdida Básicas
-# ------------------------------------------
-#def MAD(y_true, y_pred): 
-#    """Mean Absolute Deviation (Desviación Absoluta Media)."""
-#   MAD y MAE son lo mismo 
-#   return 
 
 def MAE(y_true, y_pred):
     """Mean Absolute Error (Error Absoluto Medio)."""
     y_true = tf.cast(y_true, tf.float64)
     y_pred = tf.cast(y_pred, tf.float64)
     return tf.reduce_mean(tf.abs(y_pred - y_true))
-#MAE=tf.keras.losses.mean_absolute_error
-MAD=MAE
+
+MAD=MAE # DUDA
 
 def MARD(y_true, y_pred): 
     """Mean Absolute Relative Difference (Diferencia Absoluta Relativa Media)."""
@@ -43,15 +35,12 @@ def MSE(y_true, y_pred):
     y_true = tf.cast(y_true, tf.float64)
     y_pred = tf.cast(y_pred, tf.float64)
     return (tf.square(y_pred - y_true))
-#MSE=tf.keras.losses.mean_squared_error
 
 def RMSE(y_true, y_pred):
     """Root Mean Squared Error (Raíz del Error Cuadrático Medio)."""
     y_true = tf.cast(y_true, tf.float64)
     y_pred = tf.cast(y_pred, tf.float64)
     return tf.sqrt(tf.reduce_mean(tf.square(y_pred - y_true)))
-#RMSE=tf.sqrt(tf.keras.losses.mean_squared_error)
-
 
 # ------------------------------------------
 # Métricas/Funciones de Pérdida Clínicas
@@ -62,6 +51,7 @@ def clinical_penalty(y_true, y_pred):
     Simone Del Favero, Andrea Facchinetti, and Claudio Cobelli, Fellow, IEEE
     https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=6135492
     https://github.com/MiceLab/MiceLab-Grammatical-Evolution-and-Type-1-Diabetes/blob/master/src/ge/EvaluateDataTable.java
+    Dominio [1, 2.5] de minimización
     """
     output = tf.cast(y_pred, tf.float64)
     target = tf.cast(y_true, tf.float64)
@@ -74,26 +64,26 @@ def clinical_penalty(y_true, y_pred):
     alphaL = 1.5
     alphaH = 1.0
 
-    Aux1zona1 = sigmoide(target, tetaL - (betaL / 2.0), -0.3)
-    Aux2zona1 = sigmoide(output, target + (lambdaL / 2.0), 0.6)
+    Aux1zona1 = sigmoid(target, tetaL - (betaL / 2.0), -0.3)
+    Aux2zona1 = sigmoid(output, target + (lambdaL / 2.0), 0.6)
     zona1 = alphaL * Aux1zona1 * Aux2zona1
 
-    Aux1zona2 = sigmoide(target, tetaH + (betaH / 2.0), 0.1)
-    Aux2zona2 = sigmoide(output, target - (lambdaH / 2.0), -0.4)
+    Aux1zona2 = sigmoid(target, tetaH + (betaH / 2.0), 0.1)
+    Aux2zona2 = sigmoid(output, target - (lambdaH / 2.0), -0.4)
     zona2 = alphaH * Aux1zona2 * Aux2zona2
     
     zona3 = 1.0
 
     return zona1 + zona2 + zona3
 
-def gMAE_italiana(y_true, y_pred):
-    """Mean Absolute Error (Error Absoluto Medio)."""
-    y_true = tf.cast(y_true, tf.float64)
-    y_pred = tf.cast(y_pred, tf.float64)
-    pen=clinical_penalty(y_true, y_pred)
-    return tf.reduce_mean(pen * tf.abs(y_pred - y_true))
+# def gMAE_italiana(y_true, y_pred): ## DUDA: no se usa
+#     """Mean Absolute Error (Error Absoluto Medio)."""
+#     y_true = tf.cast(y_true, tf.float64)
+#     y_pred = tf.cast(y_pred, tf.float64)
+#     pen=clinical_penalty(y_true, y_pred)
+#     return tf.reduce_mean(pen * tf.abs(y_pred - y_true))
 
-def gMAD_italiana(y_true, y_pred):
+def gMAD(y_true, y_pred):
     y_true = tf.cast(y_true, tf.float64)
     y_pred = tf.cast(y_pred, tf.float64)
     """
@@ -105,31 +95,31 @@ def gMAD_italiana(y_true, y_pred):
     """
     return clinical_penalty(y_true, y_pred) * tf.abs(y_true - y_pred)
 
-def gMARD_italiana(y_true, y_pred):
-    """
-    Penalized Mean Absolute Relative Deviation for glucose prediction (gMARD)
-    
-    Args:
-        y_true: Ground truth glucose values g(t)
-        y_pred: Predicted glucose values ĝ(t)
-    """
-    y_true = tf.cast(y_true, tf.float64)
-    y_pred = tf.cast(y_pred, tf.float64)
-    epsilon = tf.constant(1e-10, dtype=tf.float64)
-    relative_diff = tf.abs(y_pred - y_true) / tf.maximum(tf.abs(y_true), epsilon)
-    pen = clinical_penalty(y_true, y_pred)
-    return tf.reduce_mean(pen * relative_diff)
+# def gMARD_italiana(y_true, y_pred): # DUDA: no se usa
+#     """
+#     Penalized Mean Absolute Relative Deviation for glucose prediction (gMARD)
+#
+#     Args:
+#         y_true: Ground truth glucose values g(t)
+#         y_pred: Predicted glucose values ĝ(t)
+#     """
+#     y_true = tf.cast(y_true, tf.float64)
+#     y_pred = tf.cast(y_pred, tf.float64)
+#     epsilon = tf.constant(1e-10, dtype=tf.float64)
+#     relative_diff = tf.abs(y_pred - y_true) / tf.maximum(tf.abs(y_true), epsilon)
+#     pen = clinical_penalty(y_true, y_pred)
+#     return tf.reduce_mean(pen * relative_diff)
 
-def gMSE_italiana(y_true, y_pred):
+def gMSE(y_true, y_pred):
     """Glucose Mean Squared Error (Error Cuadrático Medio Glucoseado)."""
     return clinical_penalty(y_true, y_pred)*MSE(y_true, y_pred)
 
-def gRMSE_italiana(y_true, y_pred):
-    """Glucose Root Mean Squared Error (Raíz del Error Cuadrático Medio Glucoseado)."""
-    y_true = tf.cast(y_true, tf.float64)
-    y_pred = tf.cast(y_pred, tf.float64)
-    pen = clinical_penalty(y_true, y_pred)
-    return tf.sqrt(tf.reduce_mean(pen * tf.square(y_true - y_pred)))
+# def gRMSE_italiana(y_true, y_pred): # DUDA: no se usa
+#     """Glucose Root Mean Squared Error (Raíz del Error Cuadrático Medio Glucoseado)."""
+#     y_true = tf.cast(y_true, tf.float64)
+#     y_pred = tf.cast(y_pred, tf.float64)
+#     pen = clinical_penalty(y_true, y_pred)
+#     return tf.sqrt(tf.reduce_mean(pen * tf.square(y_true - y_pred)))
 
 
 
@@ -220,17 +210,17 @@ def c_sig(y_true, y_pred, p=0.1):
     pD11=p #Yo lo elijo, siempre que p>0.0
     #mD11=0.0 #0.0 por definición
     cD11=70.0 #70.0 por definición
-    D11=sigmoide(output, cD11, pD11) #D11=sigmoide(output - mD11*target, pD11, cD11)
+    D11=sigmoid(output, cD11, pD11) #D11=sigmoide(output - mD11*target, pD11, cD11)
     #D12 (mini diagonal entre A y D1)
     pD12=p #Yo lo elijo, siempre que p>0.0
     mD12=6.0/5.0 #(500-70)/(500/1.2-175/3)
     cD12=0.0 #70.0-mD12*175.0/3.0=0.0 
-    D12=sigmoide(output - mD12*target, cD12, pD12)
+    D12=sigmoid(output - mD12 * target, cD12, pD12)
     #D13 (recta vertical entre D1 y B1 o C1)
     pD13=-p #Yo lo elijo, siempre que p<0.0
     #mD13=1.0 #0.0 por definición
     cD13=70.0 #70.0 por definición
-    D13=sigmoide(target, cD13, pD13)
+    D13=sigmoid(target, cD13, pD13)
     
     D1=D11*D12*D13*2.0
     
@@ -240,7 +230,7 @@ def c_sig(y_true, y_pred, p=0.1):
     # se crea sola al sumar D1 y C1, que pasan por debajo de E1
     pE11=p #Yo lo elijo, siempre que p>0.0
     cE11=180.0 #180.0 por definición
-    E11=sigmoide(output, cE11, pE11)
+    E11=sigmoid(output, cE11, pE11)
     #E12 (recta entre E1 y C1)
     #pE12=-p #Yo lo elijo, siempre que p<0.0
     #cE12=70.0 #70.0 por definición
@@ -256,7 +246,7 @@ def c_sig(y_true, y_pred, p=0.1):
     pC12=p #Yo lo elijo, siempre que p>0.0
     mC12=16.0/11.0 #(500-180)/(290-70)
     cC12=860.0/11.0 #180-mC12*70
-    C12=sigmoide(output - mC12*target, cC12, pC12)
+    C12=sigmoid(output - mC12 * target, cC12, pC12)
     
     C1=C11*C12
 
@@ -273,12 +263,12 @@ def c_sig(y_true, y_pred, p=0.1):
     pB21=p #Yo lo elijo, siempre que p>0.0
     #mB21=1.0 #1.0 por definición
     cB21=70.0 #70.0 por definición
-    B21=sigmoide(target, cB21, pB21) 
+    B21=sigmoid(target, cB21, pB21)
     #B22 (diagonal entre A y B2)
     pB22=-p #Yo lo elijo, siempre que p<0.0
     mB22=(400.79-56.0)/(500.0-70.0) 
     cB22=56.0-mB22*70.0
-    B22=sigmoide(output - mB22*target, cB22, pB22)
+    B22=sigmoid(output - mB22 * target, cB22, pB22)
     
     B2=B21*B22
     
@@ -287,11 +277,11 @@ def c_sig(y_true, y_pred, p=0.1):
     pC21=-p #Yo lo elijo, siempre que p<0.0
     mC21=7.0/5.0 #70.0/(180.0-130.0)
     cC21=-182.0 #-70.0/(180.0-130.0)*130.0
-    C21=sigmoide(output - mC21*target, cC21, pC21)
+    C21=sigmoid(output - mC21 * target, cC21, pC21)
     #C22 (recta entre E2 y D2)
     pC22=-p #Yo lo elijo, siempre que p<0.0
     cC22=70.0 #70.0 por definición
-    C22=sigmoide(output, cC22, pC22)
+    C22=sigmoid(output, cC22, pC22)
     
     C2=C21*C22
     
@@ -299,11 +289,11 @@ def c_sig(y_true, y_pred, p=0.1):
     #D21 (recta vertical entre B2 y D2)
     pD21=p #Yo lo elijo, siempre que p<0.0
     cD21=240.0 #240.0 por definición
-    D21=sigmoide(target, cD21, pD21)
+    D21=sigmoid(target, cD21, pD21)
     #D22 (recta horizontal entre B2 y D2)
     pD22=-p #Yo lo elijo, siempre que p<0.0
     cD22=180.0 #180.0 por definición
-    D22=sigmoide(output, cD22, pD22)
+    D22=sigmoid(output, cD22, pD22)
     
     D2=D21*D22*2.0
     
@@ -311,41 +301,56 @@ def c_sig(y_true, y_pred, p=0.1):
     #E21 (recta vertical entre C2 y E2)
     pE21=p #Yo lo elijo, siempre que p>0.0
     cE21=180.0 #180.0 por definición
-    E21=sigmoide(target, cE21, pE21)
+    E21=sigmoid(target, cE21, pE21)
     #E22 (recta horizontal entre B2 o D2 y E2)
     E22=C22
     
-    E2=E21*E22*2.0*sigmoide(target, cD21, -pD21)
+    E2= E21 * E22 * 2.0 * sigmoid(target, cD21, -pD21)
     #E2=E21*E22*(1.0+2.0*sigmoide(target, cD21, -pD21))
     
     
     return A + B1 + B2 + C1 + C2 + D1 + D2 + E1 + E2
 
+def c_sig_p01(y_true, y_pred):
+    return c_sig(y_true, y_pred, p=0.1)
+
+
+def c_sig_p06(y_true, y_pred):
+    return c_sig(y_true, y_pred, p=0.6)
+
+
+def c_sig_MSE_p01(y_true, y_pred):
+    return c_sig(y_true, y_pred, p=0.1) * MSE(y_true, y_pred)
+
+
+def c_sig_MSE_p06(y_true, y_pred):
+    return c_sig(y_true, y_pred, p=0.6) * MSE(y_true, y_pred)
+
 
 import pandas as pd
 import numpy as np
 # Cargar el archivo CSV
-SEG_df = pd.read_csv('Riskpairdata.csv')
+# SEG_df = pd.read_csv('Riskpairdata.csv') # DUDA: para qué sirve este CSV si no se implementó finalmente seg?
 
-def Surveillance_Error_Grid(y_true, y_pred):
-    y_true = int(abs(y_true))
-    y_pred = int(abs(y_pred))
-    # Buscar la fila que coincida con REF=y_true y BGM=y_pred
-    match = SEG_df[(SEG_df['REF'] == y_true) & (SEG_df['BGM'] == y_pred)]
-    
-    if not match.empty:
-        return match.iloc[0]['abs_risk']+1.0
-    else:
-        # Calcular la distancia euclidiana entre (y_true, y_pred) y cada (REF, BGM)
-        SEG_df['distance'] = np.sqrt((SEG_df['REF'] - y_true)**2 + (SEG_df['BGM'] - y_pred)**2)
-    
-        # Encontrar la fila con la menor distancia
-        closest_row = SEG_df.loc[SEG_df['distance'].idxmin()]
-    
-        return closest_row['abs_risk']+1.0
-        
-        #return None
-        
+# def Surveillance_Error_Grid(y_true, y_pred): # DUDA: no se implementó correctamente?
+#     y_true = int(abs(y_true))
+#     y_pred = int(abs(y_pred))
+#     # Buscar la fila que coincida con REF=y_true y BGM=y_pred
+#     match = SEG_df[(SEG_df['REF'] == y_true) & (SEG_df['BGM'] == y_pred)]
+#
+#     if not match.empty:
+#         return match.iloc[0]['abs_risk']+1.0
+#     else:
+#         # Calcular la distancia euclidiana entre (y_true, y_pred) y cada (REF, BGM)
+#         SEG_df['distance'] = np.sqrt((SEG_df['REF'] - y_true)**2 + (SEG_df['BGM'] - y_pred)**2)
+#
+#         # Encontrar la fila con la menor distancia
+#         closest_row = SEG_df.loc[SEG_df['distance'].idxmin()]
+#
+#         return closest_row['abs_risk']+1.0
+#
+#         #return None
+#
 
 # Convertir REF y BGM a tensores de TensorFlow una sola vez
 '''
@@ -385,9 +390,9 @@ def Surveillance_Error_Grid222(y_true, y_pred):
 '''
 #Surveillance_Error_Grid=np.vectorize(Surveillance_Error_Grid)
 
-def Surveillance_Error_Grid_MSE(y_true, y_pred):
-    """Surveillance Error Grid Mean Squared Error (Error Cuadrático Medio de la Grilla de Vigilancia)."""
-    return Surveillance_Error_Grid(y_true, y_pred)*MSE(y_true, y_pred)
+# def Surveillance_Error_Grid_MSE(y_true, y_pred):
+#     """Surveillance Error Grid Mean Squared Error (Error Cuadrático Medio de la Grilla de Vigilancia)."""
+#     return Surveillance_Error_Grid(y_true, y_pred)*MSE(y_true, y_pred)
 
 def c_sig_p01(y_true, y_pred):
     return c_sig(y_true, y_pred, p=0.1)

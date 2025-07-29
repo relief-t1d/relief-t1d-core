@@ -24,35 +24,19 @@ import subprocess
 
 # ----------------------- Custom loss function -----------------------
 
-def c_sig_p01(y_true, y_pred):
-    return c_sig(y_true, y_pred, p=0.1)
 
-
-def c_sig_p06(y_true, y_pred):
-    return c_sig(y_true, y_pred, p=0.6)
-
-
-def c_sig_MSE_p01(y_true, y_pred):
-    return c_sig(y_true, y_pred, p=0.1) * MSE(y_true, y_pred)
-
-
-def c_sig_MSE_p06(y_true, y_pred):
-    return c_sig(y_true, y_pred, p=0.6) * MSE(y_true, y_pred)
-
-loss_functions_dic = {"EloyPenaltyp01": c_sig_p01,  # Former: EloyPenaltyp01.  # c_sig (documento: Clarke Sigmoid-shaped Cost Function (C-Sig)
-                      "EloyPenaltyp06": c_sig_p06,  # Former: EloyPenaltyp06,
-                      "RMSE": RMSE,  # rmse
-                      "gMSEitaliana": gMSE_italiana,  # gMSE
-                      "gMADitaliana": gMAD_italiana,  # gMAD
-                      "EloyPenaltyMSEp01": c_sig_MSE_p01, #  Former: EloyPenaltyMSEp01,
-                      "EloyPenaltyMSEp06": c_sig_MSE_p06, #  Former: EloyPenaltyMSEp06,
+loss_functions_dic = {"cSigP01": c_sig_p01,  # Former: EloyPenaltyp01,  # c_sig with p = 0.1
+                      "cSigP06": c_sig_p06,  # Former: EloyPenaltyp06, # c_sig with p = 0.6
+                      "RMSE": RMSE,
+                      "gMSE": gMSE,
+                      "gMAD": gMAD,
+                      "cSigMSEP01": c_sig_MSE_p01,  #  Former: EloyPenaltyMSEp01, # c_sig_MSE with p = 0.1
+                      "cSigMSEP06": c_sig_MSE_p06,  #  Former: EloyPenaltyMSEp06, # c_sig_MSE with p = 0.6
                       }
 
-# loss_function_name_list = ['RMSE', 'EloyPenaltyp01', 'EloyPenaltyp06', 'gMSEitaliana'] # Good
-# loss_function_name_list = ['RMSE', 'EloyPenaltyp01', 'EloyPenaltyp06', 'gMSEitaliana', 'gMADitaliana', 'EloyPenaltyMSEp01', 'EloyPenaltyMSEp06'] # ALL
-loss_function_name_list = ['EloyPenaltyMSEp06']
+loss_function_name_list = ['RMSE', 'cSigP01', 'cSigP06', 'gMSE', 'gMAD', 'cSigMSEP01', 'cSigMSEP06'] # ALL
 
-# ----------------------- ENd Custom loss function -----------------------
+# ----------------------- End Custom loss function -----------------------
 
 # Set seeds for reproducibility
 np.random.seed(42)
@@ -65,23 +49,23 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 batch_size = 4096
 patience = 10
-max_epoch = 2
+max_epoch = 500
 dropout = 0.1  # Dropout for LSTM layers
 recurrent_dropout = 0.0  # Dropout rate for LSTM layers
 
 # Path to the windows data (must include final slash)
-windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/folds_deduplicated_intra_patient_balanced_splits_DiaTrend_v2/'
+windows_path = '/opt/datasets/folds/T1DiabetesGranada/'
 
 history_length = 8  # 2h
 
 do_cross_validation = True  # If True, it will use the cross-validation folds in the dataset
 
-horizons = [2]
-algorithms = ['LSTM']
+horizons = [2, 4]
+algorithms = ['Linear', 'LSTM', 'CNN']
 
 # Sensor reading limits
-maximum_sensor_reading = 401
-minimum_sensor_reading = 38.96
+maximum_sensor_reading = 500
+minimum_sensor_reading = 40
 
 ###################### END CONFIG EXPERIMENT #############################
 
@@ -269,9 +253,8 @@ try:
 
         m.compile(loss=loss_function,
                   optimizer=keras.optimizers.Adam(),
-                  metrics=[keras.metrics.MeanSquaredError(),
-                           keras.metrics.RootMeanSquaredError(),
-                           ClinicalPenaltyLoss()])  # DUDA: que es la ClinicalPenaltyLoss()
+                  metrics=[keras.metrics.RootMeanSquaredError(),
+                           ClinicalPenaltyLoss()])
         if weights:
             print(f"Weights: {weights}")
             m.load_weights(weights)
@@ -303,7 +286,7 @@ try:
                                                      embeddings_freq=0,
                                                      embeddings_metadata=None))
         callbacks.append(keras.callbacks.CSVLogger(filepath + "_history.csv", separator=',',
-                                                   append=False))  # DUDA: pq hay tanto cambio en la definición de la callback?
+                                                   append=False))  # Parameters for tensorboard
         return callbacks
 
     def prepare_model_LSTM(history_length, nb_hidden_units=128, weights='', loss_function=loss_functions_dic['RMSE']):
@@ -461,7 +444,7 @@ try:
                     print()
 
                     get_train_plots_loss(hist, f"plots/{current_name}")
-                    get_train_plots_MSE(hist, f"plots/{current_name}")
+                    # get_train_plots_MSE(hist, f"plots/{current_name}")
 
                     df_hist = pd.DataFrame(data=hist.history)
                     df_hist.to_csv(f'hist/df_hist_{current_name}.csv')
