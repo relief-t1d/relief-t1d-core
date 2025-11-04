@@ -42,7 +42,7 @@ history_length = 8  # 2h
 
 do_cross_validation = True  # If True, it will use the cross-validation folds in the dataset
 
-horizons = [2, 4]
+horizons = [2]
 algorithms = ['Linear', 'LSTM', 'CNN']
 
 # Sensor reading limits

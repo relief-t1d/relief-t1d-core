@@ -5,12 +5,9 @@ from keras.models import Model
 from keras.layers import Conv1D, MaxPooling1D, Flatten
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow import keras
-import numpy as np
-import tensorflow as tf
 import random
 import os
 import sys
-import pandas as pd
 from pandas import DataFrame
 import time
 import matplotlib.pyplot as plt
@@ -26,44 +23,43 @@ from metricas_chulas import *
 
 # Custom penalty functions
 
-def EloyPenaltyp01(y_true, y_pred):
-    return Eloy_Penalty(y_true, y_pred, p=0.1)
+def c_sig_p01(y_true, y_pred):
+    return c_sig(y_true, y_pred, p=0.1)
 
 
-def EloyPenaltyp06(y_true, y_pred):
-    return Eloy_Penalty(y_true, y_pred, p=0.6)
+def c_sig_p06(y_true, y_pred):
+    return c_sig(y_true, y_pred, p=0.6)
 
 
-def EloyPenaltyMSEp01(y_true, y_pred):
-    return Eloy_Penalty(y_true, y_pred, p=0.1) * MSE(y_true, y_pred)
+def c_sig_MSE_p01(y_true, y_pred):
+    return c_sig(y_true, y_pred, p=0.1) * MSE(y_true, y_pred)
 
 
-def EloyPenaltyMSEp06(y_true, y_pred):
-    return Eloy_Penalty(y_true, y_pred, p=0.6) * MSE(y_true, y_pred)
+def c_sig_MSE_p06(y_true, y_pred):
+    return c_sig(y_true, y_pred, p=0.6) * MSE(y_true, y_pred)
 
 
-# loss_function_name = "RMSE"  # default loss function
+loss_function_name = "RMSE"  # default loss function
 
-loss_functions_dic = {"EloyPenaltyp01": EloyPenaltyp01,  # c_sig (documento: Clarke Sigmoid-shaped Cost Function (C-Sig)
-                      "EloyPenaltyp06": EloyPenaltyp06,
+loss_functions_dic = {"EloyPenaltyp01": c_sig_p01,  # Former: EloyPenaltyp01.  # c_sig (documento: Clarke Sigmoid-shaped Cost Function (C-Sig)
+                      "EloyPenaltyp06": c_sig_p06,  # Former: EloyPenaltyp06,
                       "RMSE": RMSE,  # rmse
                       "gMSEitaliana": gMSE_italiana,  # gMSE
                       "SEG": Surveillance_Error_Grid,  # seg
                       "SEGmse": Surveillance_Error_Grid_MSE,  # segMSE
                       "gMADitaliana": gMAD_italiana,  # gMAD
-                      "EloyPenaltyMSEp01": EloyPenaltyMSEp01,
-                      # c_sigMSE (doc: Clarke Sigmoid-shaped MSE Cost Function (C-SigMSE)
-                      "EloyPenaltyMSEp06": EloyPenaltyMSEp06,
+                      "EloyPenaltyMSEp01": c_sig_MSE_p01, #  Former: EloyPenaltyMSEp01,
+                      "EloyPenaltyMSEp06": c_sig_MSE_p06, #  Former: EloyPenaltyMSEp06,
                       }
 
-# loss_function = loss_functions_dic[loss_function_name]
-# print("INFO: loss_function = ", loss_function)
-# print("INFO: loss_function_name = ", loss_function_name)
+loss_function = loss_functions_dic[loss_function_name]
+print("INFO: loss_function = ", loss_function)
+print("INFO: loss_function_name = ", loss_function_name)
 
 # Set seeds for reproducibility
-np.random.seed(42)
-tf.random.set_seed(42)
-random.seed(42)
+np.random.seed(50)
+tf.random.set_seed(50)
+random.seed(50)
 os.environ['TF_DETERMINISTIC_OPS'] = '1'
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 
@@ -81,9 +77,9 @@ history_length = 8  # 2h
 
 do_cross_validation = False  # If True, it will use the cross-validation folds in the dataset
 
-horizons = [2, 4, 6, 8, 12, 16]
+horizons = [2, 4] #, 6, 8, 12, 16]
 algorithms = ['CNN', 'LSTM', 'Linear']
-loss_function_name_list = ['RMSE', 'EloyPenaltyp01', 'EloyPenaltyp06', 'gMSEitaliana', 'SEG', 'SEGmse', 'gMADitaliana', 'EloyPenaltyMSEp01', 'EloyPenaltyMSEp06']
+loss_function_name_list = ['RMSE', 'EloyPenaltyp01', 'EloyPenaltyp06', 'gMSEitaliana', 'SEG', 'gMADitaliana', 'EloyPenaltyMSEp01', 'EloyPenaltyMSEp06']
 
 # Sensor reading limits
 maximum_sensor_reading = 500
@@ -655,9 +651,8 @@ try:
                 k_folds = 1
                 print("Cross-validation is disabled. Using the first fold for training, validation, and testing.")
 
-            df = pd.read_parquet(f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet")
-
             for current_fold in range(0, k_folds):  # For all folds -------------------------------------
+                df = pd.read_parquet(f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet")
 
                 # Filter the DataFrame for training for the current fold
                 df_train = df[df[f'fold_{current_fold}'] == 'train']

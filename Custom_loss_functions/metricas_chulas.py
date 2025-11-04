@@ -56,7 +56,7 @@ def RMSE(y_true, y_pred):
 # ------------------------------------------
 # Métricas/Funciones de Pérdida Clínicas
 # ------------------------------------------
-def Clinical_Penalty(y_true, y_pred):
+def clinical_penalty(y_true, y_pred):
     """Función de penalización clínica para glucosa en sangre.
     A Glucose-Specific Metric to Assess Predictors and Identify Models
     Simone Del Favero, Andrea Facchinetti, and Claudio Cobelli, Fellow, IEEE
@@ -90,7 +90,7 @@ def gMAE_italiana(y_true, y_pred):
     """Mean Absolute Error (Error Absoluto Medio)."""
     y_true = tf.cast(y_true, tf.float64)
     y_pred = tf.cast(y_pred, tf.float64)
-    pen=Clinical_Penalty(y_true, y_pred)
+    pen=clinical_penalty(y_true, y_pred)
     return tf.reduce_mean(pen * tf.abs(y_pred - y_true))
 
 def gMAD_italiana(y_true, y_pred):
@@ -101,7 +101,7 @@ def gMAD_italiana(y_true, y_pred):
         y_true: Ground truth glucose values g(t)
         y_pred: Predicted glucose values ĝ(t)
     """
-    pen = Clinical_Penalty(y_true, y_pred)
+    pen = clinical_penalty(y_true, y_pred)
     return tf.reduce_mean(pen * tf.abs(y_true - y_pred))
 
 def gMARD_italiana(y_true, y_pred):
@@ -116,18 +116,18 @@ def gMARD_italiana(y_true, y_pred):
     y_pred = tf.cast(y_pred, tf.float64)
     epsilon = tf.constant(1e-10, dtype=tf.float64)
     relative_diff = tf.abs(y_pred - y_true) / tf.maximum(tf.abs(y_true), epsilon)
-    pen = Clinical_Penalty(y_true, y_pred)
+    pen = clinical_penalty(y_true, y_pred)
     return tf.reduce_mean(pen * relative_diff)
 
 def gMSE_italiana(y_true, y_pred):
     """Glucose Mean Squared Error (Error Cuadrático Medio Glucoseado)."""
-    return Clinical_Penalty(y_true, y_pred)*MSE(y_true, y_pred)
+    return clinical_penalty(y_true, y_pred)*MSE(y_true, y_pred)
 
 def gRMSE_italiana(y_true, y_pred):
     """Glucose Root Mean Squared Error (Raíz del Error Cuadrático Medio Glucoseado)."""
     y_true = tf.cast(y_true, tf.float64)
     y_pred = tf.cast(y_pred, tf.float64)
-    pen = Clinical_Penalty(y_true, y_pred)
+    pen = clinical_penalty(y_true, y_pred)
     return tf.sqrt(tf.reduce_mean(pen * tf.square(y_true - y_pred)))
 
 
@@ -195,10 +195,10 @@ class ClinicalPenaltyLoss(tf.keras.losses.Loss):
         super().__init__(name=name, **kwargs)
 
     def call(self, y_true, y_pred):
-        return Clinical_Penalty(y_true, y_pred)
+        return clinical_penalty(y_true, y_pred)
     
 
-def Eloy_Penalty(y_true, y_pred, p=0.1):
+def c_sig(y_true, y_pred, p=0.1):
     """Función de penalización clínica para glucosa en sangre.
     Basada en el Clark Error Grid (CEG).
     """

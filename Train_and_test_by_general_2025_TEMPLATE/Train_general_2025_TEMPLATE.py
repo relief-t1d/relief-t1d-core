@@ -219,7 +219,7 @@ try:
 
         def build(self):
             i = Input(shape=self.input_shape)
-            x = Dense(self.nb_output_units, activation=None)(i)
+            x = Dense(self.nb_output_units, activation=None, kernel_initializer='he_normal')(i)
 
             return Model(inputs=[i], outputs=[x])
 
@@ -346,9 +346,9 @@ try:
                 k_folds = 1
                 print("Cross-validation is disabled. Using the first fold for training, validation, and testing.")
 
-            results_vector_list = []
-
             for current_algorithm in algorithms:  # For all models ---------------------------------------
+
+                results_vector_list = []
 
                 if current_algorithm == 'Linear':  # prepare linear model
                     model = prepare_model_linear(history_length=history_length,

@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import os
+import warnings
 
 # Load the dataset
 path_to_load_data = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/Datasets/DiaTrend/Glucose_measurements_v3_DiaTrend.parquet'
@@ -10,7 +11,24 @@ df_data = pd.read_parquet(path_to_load_data)
 df_valid_rows = df_data[df_data['15min'].notna()]
 
 # Sort columns by 'Patient_ID' and '15min'
-df_valid_rows.loc[:, 'Patient_ID'] = df_valid_rows['Patient_ID'].astype(int)  # Ensure Patient_ID is int type
+try:
+    # Suprime el warning de copia (opcional pero recomendado)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=pd.errors.SettingWithCopyWarning)
+        df_valid_rows.loc[:, 'Patient_ID'] = df_valid_rows['Patient_ID'].astype(int)
+
+except ValueError as e:
+    print("❌ Error: No se puede convertir algunos valores de 'Patient_ID' a entero.")
+    print("Detalles:", e)
+    # Opcional: mostrar valores problemáticos
+    invalid = df_valid_rows[~df_valid_rows['Patient_ID'].astype(str).str.isdigit()]
+    print("Valores no convertibles:")
+    print(invalid['Patient_ID'].unique())
+
+except Exception as e:
+    print("❌ Otro error ocurrió:", type(e).__name__)
+    print(e)
+
 df_valid_rows = df_valid_rows.sort_values(by=['Patient_ID', '15min'])
 df_valid_rows.reset_index(drop=True, inplace=True)  # Reset index after filtering
 

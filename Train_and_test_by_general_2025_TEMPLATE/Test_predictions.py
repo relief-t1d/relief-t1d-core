@@ -16,6 +16,10 @@ def clarke_error_grid(ref_values,
      of points within that zone (0=A, 1=B, 2=C, 3=D, 4=E) and the plot
     """
     # Checking to see if the lengths of the reference and prediction arrays are the same
+    # Arrays compactos para bajar RAM
+    ref_values = np.asarray(ref_values, dtype=np.float32)
+    pred_values = np.asarray(pred_values, dtype=np.float32)
+
     assert (len(ref_values) == len(
         pred_values)), "Unequal number of values (reference : {0}) (prediction : {1}).".format(len(ref_values),
                                                                                                len(pred_values))
@@ -66,25 +70,38 @@ def clarke_error_grid(ref_values,
         # Clear plot
         plt.clf()
 
-        # Clasificar puntos por rango
-        bar_colors = ['indianred', 'red', 'limegreen', 'yellow',
-                      'orange']  # ['TBR-L2', 'TBR-L1', 'TIR', 'TAR-L1', 'TAR-L2']
+        # # Clasificar puntos por rango
+        # bar_colors = ['indianred', 'red', 'limegreen', 'yellow',
+        #               'orange']  # ['TBR-L2', 'TBR-L1', 'TIR', 'TAR-L1', 'TAR-L2']
+        #
+        # color_by_range = []
+        # for val in ref_values:
+        #     if val < 54:
+        #         color_by_range.append(bar_colors[0])
+        #     elif val < 70:
+        #         color_by_range.append(bar_colors[1])
+        #     elif val <= 180:
+        #         color_by_range.append(bar_colors[2])
+        #     elif val <= 250:
+        #         color_by_range.append(bar_colors[3])
+        #     else:
+        #         color_by_range.append(bar_colors[4])
+        #
+        # # Scatter plot con colores por rango
+        # plt.scatter(ref_values, pred_values, marker='o', c=color_by_range, s=1)
 
-        color_by_range = []
-        for val in ref_values:
-            if val < 54:
-                color_by_range.append(bar_colors[0])
-            elif val < 70:
-                color_by_range.append(bar_colors[1])
-            elif val <= 180:
-                color_by_range.append(bar_colors[2])
-            elif val <= 250:
-                color_by_range.append(bar_colors[3])
-            else:
-                color_by_range.append(bar_colors[4])
+        ax = plt.gca()
+        colors = ['indianred', 'red', 'limegreen', 'yellow', 'orange']
+        masks = (ref_values < 54,
+                (ref_values >= 54) & (ref_values < 70),
+                (ref_values >= 70) & (ref_values <= 180),
+                (ref_values > 180) & (ref_values <= 250),
+                (ref_values > 250),
+                )
 
-        # Scatter plot con colores por rango
-        plt.scatter(ref_values, pred_values, marker='o', c=color_by_range, s=1)
+        for m, c in zip(masks, colors):
+            if np.any(m):
+                ax.scatter(ref_values[m], pred_values[m], marker='o', s=1, c=c, rasterized=True)
 
         # plt.title(title_string + " Clarke Error Grid")
         plt.xlabel("Reference Concentration (mg/dl)")
@@ -134,6 +151,7 @@ def clarke_error_grid(ref_values,
         plt.text(370, 15, "E", fontsize=15, fontweight='bold')
 
         plt.savefig(f'plots/Clarke_Error_Grid{title_string}.png', dpi=350, bbox_inches='tight')
+        plt.close()
 
     # Statistics from the data
     zone = [0] * 5

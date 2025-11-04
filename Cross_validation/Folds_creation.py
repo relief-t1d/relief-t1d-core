@@ -11,9 +11,9 @@ from typing import Dict, List
 # Type alias for clarity: each fold is a dict with three lists of patient IDs (str)
 Fold = Dict[str, List[str]]  # {'train': [...], 'val': [...], 'test': [...]}
 
-path_read_data = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/no_split_2025_DiaTrend/'
-path_to_save_folds = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/folds_deduplicated_intra_patient_balanced_splits/'
-horizon_list = [2, 4]
+path_read_data = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/windows/no_split_2025_DiaTrend_V3/'
+path_to_save_folds = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/folds/folds_deduplicated_intra_patient_balanced_splits_DiaTrend_v3/'
+horizon_list = [4]
 
 # Functions -------------------------
 def make_folds_greedy_splits_valanced_priority(patient_windows: Dict[str, int],
