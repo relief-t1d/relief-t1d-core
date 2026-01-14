@@ -166,33 +166,77 @@ def clarke_error_grid(ref_values,
     # Statistics from the data
     zone = [0] * 5
     for i in range(len(ref_values)):
+        # ---------------------------------------------------------------------------------
+        # ZONE A (Clinical Accurate)
+        # ---------------------------------------------------------------------------------
         if ((ref_values[i] < 70 and pred_values[i] < 70)  # Condition 1 for Zone A (LEFT BOTTOM)
                 or
-                (pred_values[i] <= 1.2 * ref_values[i] and pred_values[i] >= 0.8 * ref_values[i])): # Condition 2 for Zone A (RIGHT DIAGONAL)
-            zone[0] += 1  # Zone A
+            (pred_values[i] <= 1.2 * ref_values[i] and pred_values[i] >= 0.8 * ref_values[i])):  # Condition 2 for Zone A (RIGHT DIAGONAL)
+            zone[0] += 1
 
-            # End of Zone A conditions --------------------
+        # EXPLANATION:
+        # (ref & pred < 70) - EXCLUSIVE: True to the clinical definition in original Clarke paper text.
+        # (<= 1.2*ref and >= 0.8*ref) - INCLUSIVE: Captures the ±20% range in original Clarke paper text.
 
-        elif ((ref_values[i] > 180 and pred_values[i] < 70) # Condition 1 for Zone E (TOP LEFT)
+
+        # End of Zone A conditions --------------------
+
+        # ---------------------------------------------------------------------------------
+        # ZONE E (Erroneous Treatment)
+        # ---------------------------------------------------------------------------------
+        elif ((ref_values[i] > 180 and pred_values[i] < 70)  # Condition 1 for Zone E (BOTTOM RIGHT)
               or
-              (ref_values[i] < 70 and pred_values[i] > 180)): # Condition 2 for Zone E (BOTTOM RIGHT)
+              (ref_values[i] < 70 and pred_values[i] > 180)):  # Condition 2 for Zone E (TOP LEFT)
 
             zone[4] += 1  # Zone E
 
-            # End of Zone E conditions --------------------
+        # EXPLANATION:
+        # (< 70 and > 180) - EXCLUSIVE: True to the original Clarke paper text.
+        # A real value of 70 or 180 is considered "in range," not "hypo" or "hyper."
+        # Therefore, (180, 69) or (70, 181) are not Zone E.
 
-        elif (((ref_values[i] >= 70 and ref_values[i] <= 290) and pred_values[i] >= ref_values[i] + 110) # Condition 1 for Zone C (TOP)
+        # End of Zone E conditions --------------------
+
+        # ---------------------------------------------------------------------------------
+        # ZONE C (Overcorrection)
+        # ---------------------------------------------------------------------------------
+        elif (((ref_values[i] >= 70 and ref_values[i] <= 290) and pred_values[i] >= ref_values[i] + 110)  # Condition 1 for Zone C (TOP)
               or
-              ((ref_values[i] >= 130 and ref_values[i] <= 180) and (pred_values[i] <= (7 / 5) * ref_values[i] - 182))): # Condition 2 for Zone C (BOTTOM)
+              ((ref_values[i] >= 130 and ref_values[i] <= 180) and (pred_values[i] <= (7 / 5) * ref_values[i] - 182))):  # Condition 2 for Zone C (BOTTOM)
 
             zone[2] += 1  # Zone C
 
-            # End of Zone C conditions --------------------
+        # EXPLANATION:
+        # Community consensus to use inclusive limits for Zone C conditions
 
-        elif ((ref_values[i] >= 240 and (pred_values[i] >= 70 and pred_values[i] <= 180)) # Condition 1 for Zone D (RIGHT)
+        # End of Zone C conditions --------------------
+
+        # ---------------------------------------------------------------------------------
+        # ZONE D (Failure to Detect)
+        # #---------------------------------------------------------------------------------
+        elif ((ref_values[i] > 240 and (
+                pred_values[i] >= 70 and pred_values[i] <= 180))  # Condition 1 for Zone D (RIGHT) # DUDA
               or
-              (ref_values[i] <= 175 / 3 and pred_values[i] <= 180 and pred_values[i] >= 70) or ((ref_values[i] >= 175 / 3 and ref_values[i] < 70) and pred_values[i] >= (6 / 5) * ref_values[i])): # Condition 2 and 3 for Zone D (LEFT)
-            zone[3] += 1  # Zone D
+              (ref_values[i] <= 175 / 3 and pred_values[i] <= 180 and pred_values[i] >= 70)  # Condition 2 for Zone D (LEFT)
+              or
+              ((ref_values[i] >= 175 / 3 and ref_values[i] < 70) and pred_values[i] >= (6 / 5) * ref_values[i])):  # Condition 3 for Zone D (LEFT)
+
+            zone[3] += 1
+
+            # EXPLANATION OF THE CHANGES:
+            # The original code used (ref <= 70) in condition D3.
+            # This caused a point like (70, 90) to be classified as Zone D.
+            # But (70, 90) is clinically a Zone B error,
+            # since 70 is the edge of the target range, not hypoglycemia.
+            # By changing it to (ref < 70), (70, 90) fails this condition and
+            # correctly falls through to the 'else' (Zone B).
+            #
+            # Likewise, condition D1 was changed from (ref >= 240) to (ref > 240).
+            # This change maintains consistency with the original Clarke paper text,
+            # which textually defines this specific clinical failure as (ref > 240).
+            #
+            # The other prediction value limits (>= 70, <= 180) in D1 and D2 are correct because
+            # they define the "target range" that the meter erroneously predicts.
 
             # End of Zone D conditions --------------------
 
@@ -216,12 +260,12 @@ def test_by_range(df_result_vector: pd.DataFrame,
     df_result_vector_TBR_1 = df_result_vector[
         (df_result_vector['y_test'] >= 54) & (df_result_vector['y_test'] < 70)]
 
-    df_result_vector_TIR = df_result_vector[(df_result_vector['y_test'] >= 70) & (df_result_vector['y_test'] < 181)]
+    df_result_vector_TIR = df_result_vector[(df_result_vector['y_test'] >= 70) & (df_result_vector['y_test'] <= 180)]
 
     df_result_vector_TAR_1 = df_result_vector[
-        (df_result_vector['y_test'] >= 181) & (df_result_vector['y_test'] < 251)]
+        (df_result_vector['y_test'] > 180) & (df_result_vector['y_test'] <= 250)]
 
-    df_result_vector_TAR_2 = df_result_vector[(df_result_vector['y_test'] >= 251)]
+    df_result_vector_TAR_2 = df_result_vector[(df_result_vector['y_test'] > 250)]
 
     list_dataframe_by_range = [df_result_vector,
                                df_result_vector_TBR_2, df_result_vector_TBR_1,
