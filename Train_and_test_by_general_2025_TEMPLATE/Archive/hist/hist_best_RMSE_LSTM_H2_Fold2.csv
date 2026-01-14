@@ -1,0 +1,10 @@
+,4
+loss,66.5538101196289
+mean_squared_error,4430.21826171875
+root_mean_squared_error,66.55988311767578
+Clinical_Penalty,1.3563398122787476
+val_loss,71.07990264892578
+val_mean_squared_error,5210.251953125
+val_root_mean_squared_error,72.18207550048828
+val_Clinical_Penalty,1.3924038410186768
+epoch,5.0
