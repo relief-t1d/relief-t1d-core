@@ -244,8 +244,8 @@ def c_sig(y_true, y_pred, p=0.1):
     C11=E11
     #C12 (diagonal entre C1 y B1)
     pC12=p #Yo lo elijo, siempre que p>0.0
-    mC12=16.0/11.0 #(500-180)/(290-70)
-    cC12=860.0/11.0 #180-mC12*70
+    mC12=1.0 #(500-180)/(290-70)
+    cC12=110 #180-mC12*70
     C12=sigmoid(output - mC12 * target, cC12, pC12)
     
     C1=C11*C12
@@ -266,7 +266,7 @@ def c_sig(y_true, y_pred, p=0.1):
     B21=sigmoid(target, cB21, pB21)
     #B22 (diagonal entre A y B2)
     pB22=-p #Yo lo elijo, siempre que p<0.0
-    mB22=(400.79-56.0)/(500.0-70.0) 
+    mB22=(400-56.0)/(500.0-70.0)
     cB22=56.0-mB22*70.0
     B22=sigmoid(output - mB22 * target, cB22, pB22)
     
