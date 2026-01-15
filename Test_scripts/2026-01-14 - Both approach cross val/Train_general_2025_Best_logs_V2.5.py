@@ -28,7 +28,7 @@ No global log file is created.
 """
 
 # ----------------------- Imports -----------------------
-from Test_predictions import test_by_range, get_train_plots_loss
+from Test_predictions import test_by_range, get_train_plots_loss, fold_results_aggregation
 from custom_loss_functions import *
 
 from keras.layers import Dense, LSTM, Input, Conv1D, MaxPooling1D, Flatten
@@ -63,9 +63,7 @@ loss_functions_dic = {
     "cSigMSEP06": c_sig_MSE_p06,
 }
 # loss_function_name_list = ['RMSE', 'cSigP01', 'cSigP06', 'gMSE', 'gMAD', 'cSigMSEP01', 'cSigMSEP06']
-# Missing CNN H4 from cSigP01
-# loss_function_name_list = [ 'cSigP01', 'cSigP06', 'cSigMSEP01', 'cSigMSEP06']
-loss_function_name_list = [ 'RMSE', 'gMSE', 'gMAD']
+loss_function_name_list = [ 'RMSE']
 # ----------------------- End custom losses mapping -----------------------
 
 # ----------------------- Reproducibility -----------------------
@@ -79,13 +77,16 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 # ----------------------- Config -----------------------
 batch_size = 4096
 patience = 10
-max_epoch = 500
+max_epoch = 2
+# max_epoch = 500
 dropout = 0.1
 recurrent_dropout = 0.0
 windows_path = os.path.join(os.sep, 'opt', 'datasets', 'folds', 'T1DiabetesGranada') + os.sep
 history_length = 8
 do_cross_validation = True
+# horizons = [2]
 horizons = [2, 4]
+# algorithms = ['Linear']
 algorithms = ['Linear', 'LSTM', 'CNN']
 maximum_sensor_reading = 500
 minimum_sensor_reading = 40
@@ -389,6 +390,10 @@ try:
                     FIGURES_DIR = os.path.join(EXP_DIR, "results", "evaluation", "figures")
                     
                     aggregated_results = []
+                    aggregated_results_performance = []
+                    aggregated_results_out_of_range = []
+                    aggregated_results_number_of_points = []
+
                     for i in range(k_folds):
                         current_fold = i + 1
                         current_name = f"{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{current_fold}"
@@ -457,7 +462,27 @@ try:
                         preds_path = os.path.join(PRED_DIR, f'df_test_results_vectors_{current_name}.parquet')
                         df_res.to_parquet(preds_path)
                         aggregated_results.append(df_res)
-                        
+
+                        # # Generate performance metrics for this fold
+                        # df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(df_res,
+                        #                                                 f'_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{current_fold}',
+                        #                                                                               show_plot=True, plot_dir=FIGURES_DIR,
+                        #                                                                               minimum_sensor_reading=minimum_sensor_reading,
+                        #                                                                               maximum_sensor_reading=maximum_sensor_reading)
+                        # df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
+                        #                                         f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{current_fold}.csv'),
+                        #                                        index=False)
+                        # df_number_of_points.to_csv(os.path.join(METRICS_DIR,
+                        #                              f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{current_fold}.csv'),
+                        #                            index=False)
+                        # df_out_of_limits.to_csv(os.path.join(METRICS_DIR,
+                        #                               f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{current_fold}.csv'),
+                        #                         index=False)
+                        #
+                        # aggregated_results_performance.append(df_metrics_performance)
+                        # aggregated_results_number_of_points.append(df_number_of_points)
+                        # aggregated_results_out_of_range.append(df_out_of_limits)
+
                         training_plot_prefix = os.path.join(PLOTS_TRAIN_DIR, current_name)
                         get_train_plots_loss(hist, training_plot_prefix)
                         
@@ -491,15 +516,101 @@ try:
                         )
                         print(f'END prediction & saving artifacts for Fold={current_fold} (Time: {datetime.timedelta(seconds=pred_time)})\n')
 
+                    #------------------ Metric-Then-Aggregate approach ------------------
+
+                    fold_number = 1
+                    for df_current_result in aggregated_results:
+                        # Generate performance metrics for this fold
+
+                        print()
+                        print('Agregating metrics for fold ', fold_number)
+
+                        df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(df_current_result,
+                                                                                                      f'_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{fold_number}',
+                                                                                                      show_plot=False,
+                                                                                                      plot_dir=FIGURES_DIR,
+                                                                                                      minimum_sensor_reading=minimum_sensor_reading,
+                                                                                                      maximum_sensor_reading=maximum_sensor_reading)
+                        df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
+                                                                            f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{fold_number}.csv'),
+                                                                            index=False)
+                        df_metrics_performance['Fold'] = fold_number
+
+                        df_number_of_points.to_csv(os.path.join(METRICS_DIR,
+                                                                f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{fold_number}.csv'),
+                                                               index=False)
+                        df_number_of_points['Fold'] = fold_number
+
+                        df_out_of_limits.to_csv(os.path.join(METRICS_DIR,
+                                                             f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{fold_number}.csv'),
+                                                index=False)
+                        df_out_of_limits['Fold'] = fold_number
+
+                        aggregated_results_performance.append(df_metrics_performance)
+                        aggregated_results_number_of_points.append(df_number_of_points)
+                        aggregated_results_out_of_range.append(df_out_of_limits)
+
+                        print()
+                        print('Aggregated metrics for fold ', fold_number, ' done.')
+
+                        fold_number += 1
+
+                    print()
+                    print('Calculating aggregated metrics across folds (Metric-Then-Aggregate)...')
+
+                    # Calculate aggregated metrics across folds
+                    df_metrics_performance_agg = pd.concat(aggregated_results_performance, ignore_index=True)
+                    df_metrics_performance_agg.round(2).to_csv(os.path.join(METRICS_DIR, f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_metric_then_aggregate.csv'), index=False)
+                    df_metrics_performance_agg = df_metrics_performance_agg.drop(columns=['Fold'])
+                    df_metrics_performance_agg_flat, df_metrics_performance_agg_report = fold_results_aggregation(df_metrics_performance_agg)
+                    df_metrics_performance_agg_flat.round(2).to_csv(os.path.join(METRICS_DIR, f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_flat.csv'), index=False)
+                    df_metrics_performance_agg_report.round(2).to_csv(os.path.join(METRICS_DIR, f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_report.csv'), index=False)
+
+                    df_number_of_points_agg = pd.concat(aggregated_results_number_of_points, ignore_index=True)
+                    df_number_of_points_agg.to_csv(os.path.join(METRICS_DIR, f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_metric_then_aggregate.csv'), index=False)
+                    df_number_of_points_agg = df_number_of_points_agg.drop(columns=['Fold'])
+                    df_number_of_points_agg_flat, df_number_of_points_report = fold_results_aggregation(df_number_of_points_agg)
+                    df_number_of_points_agg_flat.to_csv(os.path.join(METRICS_DIR, f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_flat.csv'), index=False)
+                    df_number_of_points_report.to_csv(os.path.join(METRICS_DIR, f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_report.csv'), index=False)
+
+                    df_out_of_range_agg = pd.concat(aggregated_results_out_of_range, ignore_index=True)
+                    df_out_of_range_agg.to_csv(os.path.join(METRICS_DIR, f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_metric_then_aggregate.csv'), index=False)
+                    df_out_of_range_agg = df_out_of_range_agg.drop(columns=['Fold'])
+                    df_out_of_range_agg_flat, df_out_of_range_report = fold_results_aggregation(df_out_of_range_agg)
+                    df_out_of_range_agg_flat.to_csv(os.path.join(METRICS_DIR, f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_flat.csv'), index=False)
+                    df_out_of_range_report.to_csv(os.path.join(METRICS_DIR, f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_report.csv'), index=False)
+
+                    print('Aggregated metrics across folds (Metric-Then-Aggregate) calculated and saved.')
+                    print()
+
+                    # Save aggregated metrics across folds
+                    # df_all_folds_performance = pd.concat(aggregated_results_performance, ignore_index=True)
+                    # df_all_folds_performance.round(2).to_csv(os.path.join(METRICS_DIR, f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_metric_then_aggregate.csv'), index=False)
+                    #
+                    # df_all_folds_number_of_points = pd.concat(aggregated_results_number_of_points, ignore_index=True)
+                    # df_all_folds_number_of_points.to_csv(os.path.join(METRICS_DIR, f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_metric_then_aggregate.csv'), index=False)
+                    #
+                    # df_all_folds_out_of_range = pd.concat(aggregated_results_out_of_range, ignore_index=True)
+                    # df_all_folds_out_of_range.to_csv(os.path.join(METRICS_DIR, f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_metric_then_aggregate.csv'), index=False)
+
+
+
+                    #------------------ Aggregate - Then - Metric approach ------------------
+
+                    print()
+                    print('Calculating aggregated metrics across folds (Aggregate-Then-Metric)...')
+
                     df_all_folds = pd.concat(aggregated_results, ignore_index=True)
                     df_all_folds.to_parquet(os.path.join(PRED_DIR, f'df_test_results_vectors_{loss_function_name}_{current_algorithm}_H{current_horizon}.parquet'))
                     print(f'\nAggregated all {k_folds} folds. Total rows: {len(df_all_folds)}')
 
-                    df_metrics, df_zones, df_limits = test_by_range(df_all_folds, f'_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL', plot_dir=FIGURES_DIR, minimum_sensor_reading=minimum_sensor_reading, maximum_sensor_reading=maximum_sensor_reading)
-                    df_metrics.round(2).to_csv(os.path.join(METRICS_DIR, f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL.csv'), index=False)
-                    df_zones.to_csv(os.path.join(METRICS_DIR, f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL.csv'), index=False)
-                    df_limits.to_csv(os.path.join(METRICS_DIR, f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL.csv'), index=False)
+                    df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(df_all_folds, f'_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL', show_plot=True, plot_dir=FIGURES_DIR, minimum_sensor_reading=minimum_sensor_reading, maximum_sensor_reading=maximum_sensor_reading)
+                    df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR, f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_agregate_then_metric.csv'), index=False) # Change name agregate_then_metric
+                    df_number_of_points.to_csv(os.path.join(METRICS_DIR, f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_agregate_then_metric.csv'), index=False)
+                    df_out_of_limits.to_csv(os.path.join(METRICS_DIR, f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_agregate_then_metric.csv'), index=False)
                     print('Metrics for all folds calculated and saved.')
+
+
 
                     write_experiment_readme(EXP_DIR, loss_function_name, current_algorithm, current_horizon, history_length, experiment_context, k_folds)
                     print(f"Main README.md created at: {os.path.join(EXP_DIR, 'README.md')}")
