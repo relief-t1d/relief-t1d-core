@@ -247,6 +247,7 @@ def clarke_error_grid(ref_values,
 
 def test_by_range(df_result_vector: pd.DataFrame,
                   grid_name: str,
+                  show_plot: bool = False,
                   plot_dir: str = 'plots',
                   minimum_sensor_reading=40,
                   maximum_sensor_reading=500) -> tuple[DataFrame, DataFrame, DataFrame]:
@@ -283,7 +284,7 @@ def test_by_range(df_result_vector: pd.DataFrame,
                                                           pred_values=pred_values.values,
                                                           title_string=grid_name,
                                                           plot_dir=plot_dir,
-                                                          show_plot=True,
+                                                          show_plot=show_plot,
                                                           minimum_sensor_reading=minimum_sensor_reading,
                                                           maximum_sensor_reading=maximum_sensor_reading)
         else:  # Do not plot the graph for the other zones
@@ -419,30 +420,97 @@ def get_train_plots_MSE(hist: keras.callbacks, name: str):
     # Display the plot
     fig.savefig(name + '_MSE.pdf', dpi=350, bbox_inches='tight')
 
+def fold_results_aggregation(df:pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    This function takes a DataFrame with results from multiple folds and aggregates the results by calculating mean and
+    standard deviation by 'Range'.
+    :param df: dataframe with results from multiple folds
+    :return: two DataFrames: one with flat structure (suitable for CSV) and another formatted for reports
+    """
+    logical_order = ['ENTIRE', 'TBR_2', 'TBR_1', 'TIR', 'TAR_1', 'TAR_2']
+
+    # Select only numeric columns for calculation
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+    # ---------------------------------------------------------
+    # APPROACH A: Flat CSV Structure (Numeric)
+    # Best for saving to CSV and further analysis
+    # ---------------------------------------------------------
+
+    # 1. Group and calculate Mean and Std
+    df_grouped = df.groupby('Range')[numeric_cols].agg(['mean', 'std'])
+
+    # 2. FLATTEN THE COLUMNS (The key step)
+    # This changes MultiIndex ('A', 'mean') to single index 'A_Mean'
+    df_grouped.columns = [f"{col}_{stat.capitalize()}" for col, stat in df_grouped.columns]
+
+    # 3. Reorder rows logically and reset index to make 'Range' a normal column
+    df_flat = df_grouped.reindex(logical_order).reset_index()
+
+    # print("\n=== OPTION A: Flat Structure (Ready for CSV) ===")
+
+    # To save:
+    # df_flat.to_csv('statistical_analysis.csv', index=False)
+
+    # ---------------------------------------------------------
+    # APPROACH B: Report Structure (Text format "Mean ± Std")
+    # Best for presentations/publications
+    # ---------------------------------------------------------
+
+    df_report = pd.DataFrame(index=logical_order)
+    df_report.index.name = 'Range'
+
+    # Calculate base stats again (or reuse from above)
+    grouped = df.groupby('Range')[numeric_cols]
+    means = grouped.mean()
+    stds = grouped.std()
+
+    # Format columns
+    for col in numeric_cols:
+        df_report[col] = (
+                means[col].map('{:.2f}'.format) +
+                " ± " +
+                stds[col].map('{:.2f}'.format)
+        )
+
+    df_report = df_report.reset_index()
+
+    # print("\n=== OPTION B: Report Structure (Formatted) ===")
+
+    # To save:
+    # df_report.to_csv('final_report.csv', index=False)
+
+    return df_flat, df_report
+
 
 if __name__ == "__main__":
 
-    # path_predictions = 'c:/Users/Ciro/Mi Unidad (PDI)/_UGR_PDI_2024-05-30/RELIEF-T1D/Python_projects/Glucose_prediction_2025/Custom_loss_functions/Exp1/test_results/df_test_results_vectors_CNN_H2_EloyPenaltyp01_Fold1.parquet'
-    path_predictions = 'test_results/df_test_results_vectors_LSTM_H2.parquet'
+    # # path_predictions = 'c:/Users/Ciro/Mi Unidad (PDI)/_UGR_PDI_2024-05-30/RELIEF-T1D/Python_projects/Glucose_prediction_2025/Custom_loss_functions/Exp1/test_results/df_test_results_vectors_CNN_H2_EloyPenaltyp01_Fold1.parquet'
+    # path_predictions = 'test_results/df_test_results_vectors_LSTM_H2.parquet'
+    #
+    # df_test_results = pd.read_parquet(path_predictions)
+    #
+    # current_algorithm = 'CNN_500'  # Change this to the algorithm you are using
+    # current_horizon = 2  # Change this to the horizon you are using
+    # minimum_sensor_reading = 38.96  # Minimum sensor reading limit
+    # maximum_sensor_reading = 401  # Maximum sensor reading limit
+    #
+    # df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results,
+    #                                                                            f'_{current_algorithm}_H{current_horizon}',
+    #                                                                            minimum_sensor_reading,
+    #                                                                            maximum_sensor_reading)
+    # df_metrics_by_range = df_metrics_by_range.round(2)
+    #
+    # df_metrics_by_range.to_csv(f'test_results/metrics_performance_by_range_{current_algorithm}_H{current_horizon}.csv',
+    #                        index=False)
+    #
+    # df_zone_values.to_csv(f'test_results/number_of points_by_zones_{current_algorithm}_H{current_horizon}.csv',
+    #                   index=False)
+    #
+    # df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_algorithm}_H{current_horizon}.csv',
+    #              index=False)
 
-    df_test_results = pd.read_parquet(path_predictions)
-
-    current_algorithm = 'CNN_500'  # Change this to the algorithm you are using
-    current_horizon = 2  # Change this to the horizon you are using
-    minimum_sensor_reading = 38.96  # Minimum sensor reading limit
-    maximum_sensor_reading = 401  # Maximum sensor reading limit
-
-    df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results,
-                                                                               f'_{current_algorithm}_H{current_horizon}',
-                                                                               minimum_sensor_reading,
-                                                                               maximum_sensor_reading)
-    df_metrics_by_range = df_metrics_by_range.round(2)
-
-    df_metrics_by_range.to_csv(f'test_results/metrics_performance_by_range_{current_algorithm}_H{current_horizon}.csv',
-                           index=False)
-
-    df_zone_values.to_csv(f'test_results/number_of points_by_zones_{current_algorithm}_H{current_horizon}.csv',
-                      index=False)
-
-    df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_algorithm}_H{current_horizon}.csv',
-                 index=False)
+    df = pd.read_csv('/home/cirorodriguezleon/RELIEF-T1D/python_projects/Glucose_prediction_2026/Test_scripts/2026-01-14 - Both approach cross val/EXP-20260114-prediction-RMSE-Linear-H8-PH2-both_cross_val-v8/results/evaluation/metrics/metrics_performance_by_range_RMSE_Linear_H2_ALL_metric_then_aggregate.csv')
+    df_flat, df_report = fold_results_aggregation(df.drop(columns=['Fold']))
+    print(df_flat)
+    print(df_report)
