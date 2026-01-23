@@ -1,0 +1,148 @@
+
+Reading data file from /opt/datasets/folds/diatrend/windows/ for horizon 2...
+
+ ------- Statistics of folds created for horizon: 2-------
+
+---- Fold 1: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1610426
+  Val:   5 patients. Total windows: 265433
+  Test:  11 patients. Total windows: 446965
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 69.33%
+  Val:   9.80 percentage of patients. Percentage of windows: 11.43%
+  Test:  21.57 percentage of patients. Percentage of windows: 19.24%
+
+---- Fold 2: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1625644
+  Val:   6 patients. Total windows: 217813
+  Test:  10 patients. Total windows: 479367
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 69.99%
+  Val:   11.76 percentage of patients. Percentage of windows: 9.38%
+  Test:  19.61 percentage of patients. Percentage of windows: 20.64%
+
+---- Fold 3: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1593422
+  Val:   6 patients. Total windows: 260006
+  Test:  10 patients. Total windows: 469396
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 68.60%
+  Val:   11.76 percentage of patients. Percentage of windows: 11.19%
+  Test:  19.61 percentage of patients. Percentage of windows: 20.21%
+
+---- Fold 4: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1630077
+  Val:   6 patients. Total windows: 244704
+  Test:  10 patients. Total windows: 448043
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 70.18%
+  Val:   11.76 percentage of patients. Percentage of windows: 10.53%
+  Test:  19.61 percentage of patients. Percentage of windows: 19.29%
+
+---- Fold 5: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1618242
+  Val:   6 patients. Total windows: 225529
+  Test:  10 patients. Total windows: 479053
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 69.67%
+  Val:   11.76 percentage of patients. Percentage of windows: 9.71%
+  Test:  19.61 percentage of patients. Percentage of windows: 20.62%
+
+End of statistics for folds created for horizon: 2
+
+Validating folds for horizon: 2...
+
+ ✓ R1 and R3 passed for every fold.
+✓ R2 passed – each patient appears in *test* exactly once.
+
+Test-set load per fold (number of measurements): [446965, 479367, 469396, 448043, 479053]
+Deviation from mean (%)                      : [-3.79, 3.19, 1.04, -3.56, 3.12]
+✓ R4 passed – test loads within ±10.0% of the mean.
+
+All mandatory validation checks for horizon 2 completed successfully.
+
+ ✓ File windows_with_folds_horizon_2 written: /opt/datasets/folds/diatrend/  (2,322,824 rows, 5 fold-columns)
+
+Reading data file from /opt/datasets/folds/diatrend/windows/ for horizon 4...
+
+ ------- Statistics of folds created for horizon: 4-------
+
+---- Fold 1: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1598896
+  Val:   5 patients. Total windows: 262079
+  Test:  11 patients. Total windows: 443714
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 69.38%
+  Val:   9.80 percentage of patients. Percentage of windows: 11.37%
+  Test:  21.57 percentage of patients. Percentage of windows: 19.25%
+
+---- Fold 2: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1613241
+  Val:   6 patients. Total windows: 216716
+  Test:  10 patients. Total windows: 474732
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 70.00%
+  Val:   11.76 percentage of patients. Percentage of windows: 9.40%
+  Test:  19.61 percentage of patients. Percentage of windows: 20.60%
+
+---- Fold 3: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1582201
+  Val:   6 patients. Total windows: 258508
+  Test:  10 patients. Total windows: 463980
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 68.65%
+  Val:   11.76 percentage of patients. Percentage of windows: 11.22%
+  Test:  19.61 percentage of patients. Percentage of windows: 20.13%
+
+---- Fold 4: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1617106
+  Val:   6 patients. Total windows: 241888
+  Test:  10 patients. Total windows: 445695
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 70.17%
+  Val:   11.76 percentage of patients. Percentage of windows: 10.50%
+  Test:  19.61 percentage of patients. Percentage of windows: 19.34%
+
+---- Fold 5: -----
+-- Totals --
+  Train: 35 patients. Total windows: 1604177
+  Val:   6 patients. Total windows: 223944
+  Test:  10 patients. Total windows: 476568
+
+ -- Percentages --
+  Train: 68.63 percentage of patients. Percentage of windows: 69.60%
+  Val:   11.76 percentage of patients. Percentage of windows: 9.72%
+  Test:  19.61 percentage of patients. Percentage of windows: 20.68%
+
+End of statistics for folds created for horizon: 4
+
+Validating folds for horizon: 4...
+
+ ✓ R1 and R3 passed for every fold.
+✓ R2 passed – each patient appears in *test* exactly once.
+
+Test-set load per fold (number of measurements): [443714, 474732, 463980, 445695, 476568]
+Deviation from mean (%)                      : [-3.74, 2.99, 0.66, -3.31, 3.39]
+✓ R4 passed – test loads within ±10.0% of the mean.
+
+All mandatory validation checks for horizon 4 completed successfully.
+
+ ✓ File windows_with_folds_horizon_4 written: /opt/datasets/folds/diatrend/  (2,304,689 rows, 5 fold-columns)
