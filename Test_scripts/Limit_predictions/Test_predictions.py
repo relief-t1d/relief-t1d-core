@@ -105,7 +105,7 @@ def clarke_error_grid(ref_values,
 
         # plt.title(title_string + " Clarke Error Grid")
         plt.xlabel("Reference Concentration (mg/dl)")
-        plt.ylabel("Prediction Concentration (mg/dl)")
+        plt.ylabel("model_prediction_scripts Concentration (mg/dl)")
         plt.xticks([0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500])
         plt.yticks([0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500])
         plt.gca().set_facecolor('white')

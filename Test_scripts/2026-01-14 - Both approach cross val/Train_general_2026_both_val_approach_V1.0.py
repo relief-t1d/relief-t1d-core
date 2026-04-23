@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-RELIEF-T1D — Training & Prediction Script (English)
+RELIEF-T1D — Training & model_prediction_scripts Script (English)
 
 Directory layout per (loss, algo, PH):
 models/
@@ -326,7 +326,7 @@ def write_fold_json_and_md(exp_dir, loss_name, algo, ph, fold_idx, fold_started_
         for split in ["train", "val", "test"]:
             f.write(f"| {split.capitalize()} | {data_counts['patients'][split]} | {data_counts['windows'][split]} | {data_counts['percent']['patients'][split]:.2f}% | {data_counts['percent']['windows'][split]:.2f}% |\n")
         f.write("\n## Timings\n")
-        f.write(f"- **Training**: {train_hms}\n- **Prediction**: {pred_hms}\n\n")
+        f.write(f"- **Training**: {train_hms}\n- **model_prediction_scripts**: {pred_hms}\n\n")
         f.write("## Artifacts\n")
         for key, val in payload["artifacts"].items():
             f.write(f"- **{key.replace('_path', '').replace('_', ' ').capitalize()}**: `{val}`\n")
@@ -340,7 +340,7 @@ def write_experiment_readme(exp_dir, loss_name, algo, ph, history_len, context, 
              f"- **Git Commit**: `{git_info['commit']}`\n",
              "## 🧪 Experiment Configuration\n",
              f"- **Algorithm**: `{algo}`", f"- **Loss Function**: `{loss_name}`",
-             f"- **Prediction Horizon (PH)**: `{ph}`", f"- **History Length (H)**: `{history_len}`\n",
+             f"- **model_prediction_scripts Horizon (PH)**: `{ph}`", f"- **History Length (H)**: `{history_len}`\n",
              "## 📊 Quick Links\n",
              "- [TensorBoard Logs](./models/)", f"- [Aggregated Predictions](./results/predictions/df_test_results_vectors_{loss_name}_{algo}_H{ph}.parquet)",
              f"- [Aggregated Metrics](./results/evaluation/metrics/metrics_performance_by_range_{loss_name}_{algo}_H{ph}_ALL.csv)",
