@@ -26,7 +26,6 @@ results/
 Each experiment directory contains a self-contained log file (experiment_log.out).
 No global log file is created.
 """
-
 # ----------------------- Imports -----------------------
 from Test_predictions import test_by_range, get_train_plots_loss, fold_results_aggregation
 from custom_loss_functions import *
@@ -77,20 +76,26 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 # ----------------------- Config -----------------------
 batch_size = 4096
 patience = 10
-max_epoch = 2
+max_epoch = 5
 # max_epoch = 500
 dropout = 0.1
 recurrent_dropout = 0.0
-windows_path = os.path.join(os.sep, 'opt', 'datasets', 'folds', 'T1DiabetesGranada') + os.sep
+# windows_path = os.path.join(os.sep, 'opt', 'datasets', 'folds', 'T1DiabetesGranada') + os.sep
+windows_path = '/home/cirorodriguezleon/RELIEF-T1D/datasets/After_2025-10-03/Preprocessed/diatrend/Final_versions_V4/Filtered_for_prediction/windows/extra_fields/5folds/'
 history_length = 8
 do_cross_validation = True
-# horizons = [2]
-horizons = [2, 4]
-# algorithms = ['Linear']
-algorithms = ['Linear', 'LSTM', 'CNN']
-maximum_sensor_reading = 500
-minimum_sensor_reading = 40
-experiment_context = "both_cross_val"
+horizons = [2, 4, 6, 8, 12, 16]
+# horizons = [2, 4]
+algorithms = ['Linear']
+# algorithms = ['Linear', 'LSTM', 'CNN']
+dataset_name = 'DiaTrend'
+maximum_sensor_reading = 401 # Diatrend and REPLACE-BG
+# maximum_sensor_reading = 500 # T1DiabetesGranada
+
+minimum_sensor_reading = 39 # Diatrend and REPLACE-BG
+# minimum_sensor_reading = 40 # T1DiabetesGranada
+
+experiment_context = "extra_fields_test"
 # ----------------------- End Config -----------------------
 
 # ----------------------- Console Tee Logic -----------------------
@@ -369,6 +374,7 @@ try:
             tf.random.set_seed(50)
             random.seed(50)
             used_columns = [f"x{i}" for i in range(history_length)] + ["y"]
+            info_columns = ['patient_id', 'x_time_7', 'x_date_7']
             k_folds = 5 if do_cross_validation else 1
             
             for current_algorithm in algorithms:
@@ -397,8 +403,10 @@ try:
                     for i in range(k_folds):
                         current_fold = i + 1
                         current_name = f"{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{current_fold}"
-                        data_file_path = f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet"
-                        
+                        # data_file_path = f"{windows_path}windows_with_folds_horizon_{current_horizon}.parquet" (FIX) windows_with_5folds_DiaTrend_PH12
+                        data_file_path = f"{windows_path}windows_with_5folds_{dataset_name}_PH{current_horizon}.parquet" #(FIX) #windows_with_5folds_DiaTrend_PH12
+                        # data_file_path = windows_path
+
                         print(f"\n---- Loading data for Fold {current_fold}/{k_folds} from: {data_file_path} ----")
                         df = pd.read_parquet(data_file_path)
 
@@ -412,6 +420,7 @@ try:
 
                         df_test = df[df[f'fold_{i}'] == 'test']
                         patients_test_number = df_test['patient_id'].nunique()
+                        df_test_info = df_test.reset_index(drop=True)[info_columns]
                         df_test = df_test.reset_index(drop=True)[used_columns]
                         
                         total_patients = patients_train_number + patients_val_number + patients_test_number
@@ -433,12 +442,15 @@ try:
                         x_train, y_train = df_train.iloc[:, :-1].to_numpy(), df_train.iloc[:, -1:].to_numpy()
                         x_val, y_val = df_val.iloc[:, :-1].to_numpy(), df_val.iloc[:, -1:].to_numpy()
                         x_test, y_test = df_test.iloc[:, :-1].to_numpy(), df_test.iloc[:, -1:].to_numpy()
-                        del df, df_train, df_val, df_test
+                        del df, df_train, df_val, df_test  # Free memory
 
                         print(f'\nSTART training {current_algorithm} - Fold={current_fold}')
-                        if current_algorithm == 'Linear': model = prepare_model_linear(history_length, loss_function=loss_function)
-                        elif current_algorithm == 'LSTM': model = prepare_model_LSTM(history_length, loss_function=loss_function)
-                        else: model = prepare_model_CNN(history_length, loss_function=loss_function)
+                        if current_algorithm == 'Linear':
+                            model = prepare_model_linear(history_length, loss_function=loss_function)
+                        elif current_algorithm == 'LSTM':
+                            model = prepare_model_LSTM(history_length, loss_function=loss_function)
+                        else:
+                            model = prepare_model_CNN(history_length, loss_function=loss_function)
 
                         fold_started_at = datetime.datetime.now()
                         start_time = time.time()
@@ -457,8 +469,10 @@ try:
                         if len(model_load.input_shape) == 3: x_test = x_test.reshape(x_test.shape[0], history_length, 1)
                         y_pred = model_load.predict(x_test)
                         pred_time = time.time() - start_pred_time
-                        
+
+                        # Concat x_test o patient ids and timestamps to y_test and y_pred, and save to parquet for later analysis
                         df_res = pd.DataFrame({'y_test': y_test.ravel(), 'y_predict': y_pred.ravel()})
+                        df_res = pd.concat([df_res, df_test_info], axis=1)
                         preds_path = os.path.join(PRED_DIR, f'df_test_results_vectors_{current_name}.parquet')
                         df_res.to_parquet(preds_path)
                         aggregated_results.append(df_res)

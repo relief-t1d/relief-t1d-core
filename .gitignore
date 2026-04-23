@@ -39,3 +39,5 @@ Scripts_Antonio/Resample/Diatrend-Glucose_measurements_v4.zip
 Test_scripts/Fix_and_understand_CEG/EXP-20251011-prediction-cSigP01-CNN-H8-PH2-CustomFunction-v1/results/predictions/df_test_results_vectors_cSigP01_CNN_H2.parquet
 Test_scripts/Fix_and_understand_CEG/EXP-20251011-prediction-cSigP01-CNN-H8-PH2-CustomFunction-v1/models
 Test_scripts/Fix_and_understand_CEG/EXP-20251011-prediction-cSigP01-CNN-H8-PH2-CustomFunction-v1
+Experiments/Prediction_Bias_paper
+Template/plots

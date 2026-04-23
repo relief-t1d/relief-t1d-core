@@ -3,14 +3,13 @@ import pandas as pd
 import os
 
 # Load the dataset
-path_to_load_data = '/home/cirorodriguezleon/RELIEF-T1D/datasets/After_2025-10-03/Preprocessed /t1diabetesgranada/Final versions V4/Filtered_for_prediction/Glucose_measurements_FILTERED_2025-11-21.parquet'
+path_to_load_data = '/home/cirorodriguezleon/RELIEF-T1D/datasets/After_2025-10-03/Preprocessed/diatrend/Final_versions_V4/Filtered_for_prediction/Glucose_measurements_FILTERED_2025-11-20.parquet'
 df_data = pd.read_parquet(path_to_load_data)
 
 # Filter valid rows (15min is not NaT)
 df_valid_rows = df_data[df_data['15min'].notna()]
 
 # Sort columns by 'Patient_ID' and '15min'
-#df_valid_rows.loc[:, 'Patient_ID'] = df_valid_rows['Patient_ID'].astype(int)  # Ensure Patient_ID is int type
 df_valid_rows = df_valid_rows.sort_values(by=['Patient_ID', '15min'])
 df_valid_rows.reset_index(drop=True, inplace=True)  # Reset index after filtering
 
@@ -27,7 +26,7 @@ history_length = 8  # 120 min
 horizons = [2]
 deduplicate_intra_patient = True  # Remove duplicated instances in a patient
 
-path_to_save_windows = '/home/cirorodriguezleon/RELIEF-T1D/datasets/Before_2025-10-03/preprocess_antonio/folds/T1DiabetesGranada/Repeat at 2025-12-05/new_windows/'
+path_to_save_windows = '/home/cirorodriguezleon/RELIEF-T1D/python_projects/Glucose_prediction_2026/Test_scripts/Extra_fields_to_windows/'
 if not os.path.exists(path_to_save_windows):
     # If it does not exist, create it
     os.makedirs(path_to_save_windows)
