@@ -428,7 +428,7 @@ try:
             plt.scatter(ref_values, pred_values, marker='o', color='darkgray', s=8)
             # plt.title(title_string + " Clarke Error Grid")
             plt.xlabel("Reference Concentration (mg/dl)")
-            plt.ylabel("Prediction Concentration (mg/dl)")
+            plt.ylabel("model_prediction_scripts Concentration (mg/dl)")
             plt.xticks([0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500])
             plt.yticks([0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500])
             plt.gca().set_facecolor('white')
@@ -672,7 +672,7 @@ try:
 
                 print()
                 print("######################################################################## - ")
-                print(f'START training {current_algorithm} - Prediction Horizon={current_horizon} - Fold={current_fold + 1}')
+                print(f'START training {current_algorithm} - model_prediction_scripts Horizon={current_horizon} - Fold={current_fold + 1}')
                 print()
 
                 # Record the TRAINING start time
@@ -693,15 +693,15 @@ try:
                 elapsed_for_training = datetime.timedelta(seconds=training_time)
                 
                 print()
-                print(f'END training {current_algorithm} - Prediction Horizon={current_horizon} - Fold={current_fold + 1}')
+                print(f'END training {current_algorithm} - model_prediction_scripts Horizon={current_horizon} - Fold={current_fold + 1}')
                 print("########################################################################")
                 print()
 
-                print(f"Training time for {current_algorithm} - Prediction Horizon={current_horizon} - Fold={current_fold + 1}: {elapsed_for_training}")
+                print(f"Training time for {current_algorithm} - model_prediction_scripts Horizon={current_horizon} - Fold={current_fold + 1}: {elapsed_for_training}")
                 print()
 
                 print("######################################################################## - ")
-                print(f'START saving logs for {current_algorithm} - Prediction Horizon={current_horizon} - Fold={current_fold + 1}')
+                print(f'START saving logs for {current_algorithm} - model_prediction_scripts Horizon={current_horizon} - Fold={current_fold + 1}')
                 print()
 
                 get_train_plots_loss(hist, f"plots/{current_name}")
@@ -714,14 +714,14 @@ try:
                 hist_best['epoch'] = df_hist.shape[0]
                 hist_best.to_csv(f'hist/hist_best_{current_name}.csv')
                 
-                print(f'END saving logs for {current_algorithm} - Prediction Horizon={current_horizon} - Fold={current_fold + 1}')
+                print(f'END saving logs for {current_algorithm} - model_prediction_scripts Horizon={current_horizon} - Fold={current_fold + 1}')
                 print("########################################################################")
                 print()
 
                 # ## TESTING ################################
 
                 print("######################################################################## - ")
-                print(f'START testing for {current_algorithm} - Prediction Horizon={current_horizon} - Fold={current_fold + 1}')
+                print(f'START testing for {current_algorithm} - model_prediction_scripts Horizon={current_horizon} - Fold={current_fold + 1}')
                 print()
 
                 # Record the TEST start time
@@ -751,10 +751,10 @@ try:
                 elapsed_testing = datetime.timedelta(seconds=testing_time)
 
                 print()
-                print(f"Testing time for {current_algorithm} - Prediction Horizon={current_horizon} - Fold={current_fold + 1}: {elapsed_testing}")
+                print(f"Testing time for {current_algorithm} - model_prediction_scripts Horizon={current_horizon} - Fold={current_fold + 1}: {elapsed_testing}")
 
                 print()
-                print(f'Test results for {current_algorithm} - Prediction Horizon={current_horizon} - Fold={current_fold + 1} - DONE')
+                print(f'Test results for {current_algorithm} - model_prediction_scripts Horizon={current_horizon} - Fold={current_fold + 1} - DONE')
                 print()
 
                 # Save predictions and references
@@ -770,9 +770,9 @@ try:
             # Save the concatenated results
             df_test_results.to_parquet(f'test_results/df_test_results_vectors_{current_algorithm}_H{current_horizon}.parquet')
 
-            print(f'Metrics for {current_algorithm} - Prediction Horizon={current_horizon} - All folds aggregated')
+            print(f'Metrics for {current_algorithm} - model_prediction_scripts Horizon={current_horizon} - All folds aggregated')
 
-            print(f"Total test results for {current_algorithm} - Prediction Horizon={current_horizon}: {len(df_test_results)} rows")
+            print(f"Total test results for {current_algorithm} - model_prediction_scripts Horizon={current_horizon}: {len(df_test_results)} rows")
 
             df_metrics_by_range, df_zone_values, df_limits = test_by_range(df_test_results,
                                                                        f'_{current_algorithm}_H{current_horizon}')
@@ -786,7 +786,7 @@ try:
             df_limits.to_csv(f'test_results/predictions_out_of_limits_{current_algorithm}_H{current_horizon}.csv',
                          index=False)
 
-            print(f'Test results of {current_algorithm} - Prediction Horizon={current_horizon}  ALL FOLDS - DONE')
+            print(f'Test results of {current_algorithm} - model_prediction_scripts Horizon={current_horizon}  ALL FOLDS - DONE')
             print('____________________________________________________________________________')
             print()
 finally:
