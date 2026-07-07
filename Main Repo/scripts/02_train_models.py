@@ -4,10 +4,47 @@ RELIEF-T1D — Refactored Training
 Root-level script orchestrating cross-validation, training, and clinical evaluation.
 """
 
-# ----------------------- Imports -----------------------
+# ---------------------------------------------------------
+# 1. SYSTEM PATH CONFIGURATION (Essential for Remote Server)
+# ---------------------------------------------------------
 import os
 import sys
+
+# Get the absolute path of the directory containing this script (scripts/)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Get the parent directory (Main Repo/) and append it to sys.path
+project_root = os.path.abspath(os.path.join(current_dir, ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# ---------------------------------------------------------
+# 2. GLOBAL REPRODUCIBILITY AND DETERMINISM (Before TensorFlow)
+# ---------------------------------------------------------
 import random
+import numpy as np
+
+GLOBAL_SEED = 50
+
+# Force GPU and environment to be deterministic BEFORE loading TensorFlow
+os.environ['PYTHONHASHSEED'] = str(GLOBAL_SEED)
+os.environ['TF_DETERMINISTIC_OPS'] = '1'
+os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+
+# Set core Python and NumPy seeds
+random.seed(GLOBAL_SEED)
+np.random.seed(GLOBAL_SEED)
+
+# Now it is safe to import TensorFlow and set its global seeds
+import tensorflow as tf
+tf.random.set_seed(GLOBAL_SEED)
+tf.keras.utils.set_random_seed(GLOBAL_SEED)
+from tensorflow import keras
+
+# ---------------------------------------------------------
+# 3. STANDARD AND THIRD-PARTY LIBRARIES
+# ---------------------------------------------------------
 import time
 import datetime
 import platform
@@ -16,11 +53,11 @@ import json
 import re
 import psutil
 import subprocess
-import numpy as np
 import pandas as pd
-from tensorflow import keras
 
-# Clean source imports from our internal modular library
+# ---------------------------------------------------------
+# 4. IMPORTS FROM INTERNAL MODULAR LIBRARY (src/)
+# ---------------------------------------------------------
 from src.models.losses import *
 from src.models.architectures import get_compiled_model
 from src.evaluation.metrics import test_by_range, get_train_plots_loss, fold_results_aggregation
@@ -38,13 +75,6 @@ loss_functions_dic = {
 loss_function_name_list = ['RMSE'] # Single loss function
 # loss_function_name_list = ['RMSE', 'cSigP01', 'cSigP06', 'gMSE', 'gMAD', 'cSigMSEP01', 'cSigMSEP06']  # All loss functions
 
-# ----------------------- Reproducibility -----------------------
-np.random.seed(50)
-tf.random.set_seed(50)
-random.seed(50)
-os.environ['TF_DETERMINISTIC_OPS'] = '1'
-os.environ['PYTHONIOENCODING'] = 'utf-8'
-
 # ----------------------- Config -----------------------
 batch_size = 4096
 patience = 10
@@ -53,7 +83,7 @@ dropout = 0.1
 recurrent_dropout = 0.0
 
 # windows_path = os.path.join(os.sep, 'opt', 'datasets', 'folds', 'T1DiabetesGranada') + os.sep
-windows_path = '/home/cirorodriguezleon/RELIEF-T1D/datasets/After_2025-10-03/Preprocessed/diatrend/Final_versions_V4/Filtered_for_prediction/windows/extra_fields/5folds/'
+windows_path = 'path/'
 history_length = 8
 do_cross_validation = True
 # horizons = [2, 4, 6, 8, 12, 16]
