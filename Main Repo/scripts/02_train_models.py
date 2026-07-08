@@ -83,21 +83,40 @@ dropout = 0.1
 recurrent_dropout = 0.0
 
 # windows_path = os.path.join(os.sep, 'opt', 'datasets', 'folds', 'T1DiabetesGranada') + os.sep
-windows_path = 'path/'
+windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/Datasets/2025-12-05/Preprocessed/diatrend/Final_versions_V4/Filtered_for_prediction/windows/extra_fields/5folds/'
+experiment_base_path = '../experiments/'
+
 history_length = 8
 do_cross_validation = True
 # horizons = [2, 4, 6, 8, 12, 16]
 horizons = [4]
 # algorithms = ['Linear', 'LSTM', 'CNN']
 algorithms = ['LSTM']
-dataset_name = 'DiaTrend'
+
 
 maximum_sensor_reading = 401  # Diatrend and REPLACE-BG
 # maximum_sensor_reading = 500 # T1DiabetesGranada
 minimum_sensor_reading = 39  # Diatrend and REPLACE-BG
 # minimum_sensor_reading = 40 # T1DiabetesGranada
 
+# ----------------------- Specific variables for readme -----------------------
 experiment_context = "context"
+
+# Dataset
+dataset_name = 'DiaTrend'
+dataset_version = 'General'
+dataset_link = 'link/to/ids'
+
+# Experiment configuration
+training_data = '70% T1DiabetesGranada'
+validation_data = '10% T1DiabetesGranada'
+testing_data = '200% T1DiabetesGranada'
+cross_validation = 'k-fold' if do_cross_validation else 'No'
+Folds = '5' if do_cross_validation else '1'
+wise_level = 'patient'
+patient_ids_link = 'link/to/patient_id'
+
+
 
 # ----------------------- Console Tee Logic -----------------------
 class Tee:
@@ -223,11 +242,16 @@ def next_versioned_dir(base_name: str) -> str:
         vnum += 1
 
 
-def build_experiment_dir(algo: str, loss_name: str, ph_value, history_len: int, context: str) -> str:
+def build_experiment_dir(base_path: str, algo: str, loss_name: str, ph_value, history_len: int, context: str) -> str:
     date_str = RUN_TS.strftime("%Y%m%d")
-    base = f"EXP-{date_str}-prediction-{safe_token(loss_name)}-{safe_token(algo)}-H{history_len}-PH{safe_token(ph_value)}-{safe_token(context)}"
+    exp_folder_name = f"EXP-{date_str}-prediction-{safe_token(loss_name)}-{safe_token(algo)}-H{history_len}-PH{safe_token(ph_value)}-{safe_token(context)}"
+
+    # Combine the base path with the experiment folder name
+    base = os.path.join(base_path, exp_folder_name)
+
     exp_dir = next_versioned_dir(base)
-    for sub in ["models", "plots/training", "results/predictions", "results/evaluation/metrics", "results/evaluation/figures", "summaries", "readmes"]:
+    for sub in ["models", "plots/training", "results/predictions", "results/evaluation/metrics",
+                "results/evaluation/figures", "summaries", "readmes"]:
         os.makedirs(os.path.join(exp_dir, sub), exist_ok=True)
     return exp_dir
 
@@ -344,7 +368,8 @@ try:
             k_folds = 5 if do_cross_validation else 1
 
             for current_algorithm in algorithms:
-                EXP_DIR = build_experiment_dir(current_algorithm, loss_function_name, current_horizon, history_length,
+                EXP_DIR = build_experiment_dir(experiment_base_path, current_algorithm, loss_function_name,
+                                               current_horizon, history_length,
                                                experiment_context)
                 exp_log_file = None
                 try:
