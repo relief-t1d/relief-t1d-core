@@ -54,6 +54,7 @@ import re
 import psutil
 import subprocess
 import pandas as pd
+import shutil
 
 # ---------------------------------------------------------
 # 4. IMPORTS FROM INTERNAL MODULAR LIBRARY (src/)
@@ -387,6 +388,9 @@ try:
                     METRICS_DIR = os.path.join(EXP_DIR, "results", "evaluation", "metrics")
                     FIGURES_DIR = os.path.join(EXP_DIR, "results", "evaluation", "figures")
 
+                    CENTRAL_EXP_MODELS_DIR = os.path.join(project_root, "models", os.path.basename(EXP_DIR))
+                    os.makedirs(CENTRAL_EXP_MODELS_DIR, exist_ok=True)
+
                     aggregated_results = []
                     aggregated_results_performance = []
                     aggregated_results_out_of_range = []
@@ -518,6 +522,18 @@ try:
                             min_sensor=minimum_sensor_reading, max_sensor=maximum_sensor_reading,
                             data_file_path=data_file_path, data_counts=data_counts
                         )
+
+                        # Duplicate weights and best.json metadata to the models repository
+                        try:
+                            if os.path.exists(weights_file):
+                                shutil.copy(weights_file, CENTRAL_EXP_MODELS_DIR)
+                            if os.path.exists(best_json_path):
+                                shutil.copy(best_json_path, CENTRAL_EXP_MODELS_DIR)
+                            print(
+                                f"Successfully copied fold {current_fold} model artifacts to central hub: {CENTRAL_EXP_MODELS_DIR}")
+                        except Exception as e:
+                            print(f"WARNING: Could not copy model artifacts to central hub: {e}")
+
                         print(
                             f'END prediction & saving artifacts for Fold={current_fold} (Time: {datetime.timedelta(seconds=pred_time)})\n')
 
