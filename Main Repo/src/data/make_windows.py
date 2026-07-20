@@ -62,7 +62,7 @@ def get_windows_one_step_walk_forward(bgl_measurement_dict,
         # Input: x0 a x7, Output: y, Date: x_date_{last column of x}, Time: x_time_{last column of x}. The date and time
         # columns are named with the last column of x to indicate that they correspond to the date and time of the last
         # measurement in the input window.
-        new_cols = [f"x{i}" for i in range(8)] + ["y"] + [f"x_date_{x.shape[1] - 1}"] + [f"x_time_{x.shape[1] - 1}"]
+        new_cols = [f"x{i}" for i in range(history_length)] + ["y"] + [f"x_date_{x.shape[1] - 1}"] + [f"x_time_{x.shape[1] - 1}"]
         df_set.columns = new_cols
         df_set['patient_id'] = patient_id
 
@@ -79,7 +79,7 @@ def get_windows_one_step_walk_forward(bgl_measurement_dict,
         # Search for duplicated rows within each patient_id group and mark them as duplicates but only on the input and
         # output columns (x0 to x7 and y), ignoring the date and time columns for duplication. This way, if two rows
         # have the same input and output values but different dates or times, they will be considered duplicates.
-        df_all_patient_set['is_duplicate'] = df_all_patient_set.duplicated(subset=[f"x{i}" for i in range(8)] + ["y"] + ['patient_id'],
+        df_all_patient_set['is_duplicate'] = df_all_patient_set.duplicated(subset=[f"x{i}" for i in range(history_length)] + ["y"] + ['patient_id'],
                                                                            keep='first')
         df_all_patient_set = df_all_patient_set[~df_all_patient_set['is_duplicate']]  # Keep only non-duplicate rows
         df_all_patient_set = df_all_patient_set.drop(columns=['is_duplicate'])  # Drop the helper column
