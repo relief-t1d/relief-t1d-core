@@ -87,7 +87,7 @@ recurrent_dropout = 0.0
 windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/Datasets/2025-12-05/Preprocessed/diatrend/Final_versions_V4/Filtered_for_prediction/windows/extra_fields/5folds/'
 experiment_base_path = '../experiments/'
 
-history_length = 8
+history_length_list = [8]
 do_cross_validation = True
 # horizons = [2, 4, 6, 8, 12, 16]
 horizons = [4]
@@ -351,312 +351,312 @@ def write_experiment_readme(exp_dir, loss_name, algo, ph, history_len, context, 
     with open(os.path.join(exp_dir, "README.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
-
 # ----------------------- Main Loop -----------------------
 try:
     sys.stdout = Tee(original_stdout)
     print("Starting script execution...")
 
-    for loss_function_name in loss_function_name_list:
-        loss_function = loss_functions_dic[loss_function_name]
-        for current_horizon in horizons:
-            tf.keras.backend.clear_session()
-            np.random.seed(50)
-            tf.random.set_seed(50)
-            random.seed(50)
-            used_columns = [f"x{i}" for i in range(history_length)] + ["y"]
-            info_columns = ['patient_id', 'x_time_7', 'x_date_7']
-            k_folds = 5 if do_cross_validation else 1
+    for current_history in history_length_list:
+        for loss_function_name in loss_function_name_list:
+            loss_function = loss_functions_dic[loss_function_name]
+            for current_horizon in horizons:
+                tf.keras.backend.clear_session()
+                np.random.seed(50)
+                tf.random.set_seed(50)
+                random.seed(50)
+                used_columns = [f"x{i}" for i in range(current_history)] + ["y"]
+                info_columns = ['patient_id', 'x_time_7', 'x_date_7']
+                k_folds = 5 if do_cross_validation else 1
 
-            for current_algorithm in algorithms:
-                EXP_DIR = build_experiment_dir(experiment_base_path, current_algorithm, loss_function_name,
-                                               current_horizon, history_length,
-                                               experiment_context)
-                exp_log_file = None
-                try:
-                    exp_log_file_path = os.path.join(EXP_DIR, "experiment_log.out")
-                    exp_log_file = open(exp_log_file_path, "a", encoding="utf-8")
-                    sys.stdout = sys.stderr = Tee(original_stdout, exp_log_file)
+                for current_algorithm in algorithms:
+                    EXP_DIR = build_experiment_dir(experiment_base_path, current_algorithm, loss_function_name,
+                                                   current_horizon, current_history,
+                                                   experiment_context)
+                    exp_log_file = None
+                    try:
+                        exp_log_file_path = os.path.join(EXP_DIR, "experiment_log.out")
+                        exp_log_file = open(exp_log_file_path, "a", encoding="utf-8")
+                        sys.stdout = sys.stderr = Tee(original_stdout, exp_log_file)
 
-                    print(f"================\nStarting Experiment: {os.path.basename(EXP_DIR)}\n================")
-                    print_system_info()
-                    print("-----------------------------------\n")
+                        print(f"================\nStarting Experiment: {os.path.basename(EXP_DIR)}\n================")
+                        print_system_info()
+                        print("-----------------------------------\n")
 
-                    MODELS_DIR = os.path.join(EXP_DIR, "models")
-                    PRED_DIR = os.path.join(EXP_DIR, "results", "predictions")
-                    PLOTS_TRAIN_DIR = os.path.join(EXP_DIR, "plots", "training")
-                    METRICS_DIR = os.path.join(EXP_DIR, "results", "evaluation", "metrics")
-                    FIGURES_DIR = os.path.join(EXP_DIR, "results", "evaluation", "figures")
+                        MODELS_DIR = os.path.join(EXP_DIR, "models")
+                        PRED_DIR = os.path.join(EXP_DIR, "results", "predictions")
+                        PLOTS_TRAIN_DIR = os.path.join(EXP_DIR, "plots", "training")
+                        METRICS_DIR = os.path.join(EXP_DIR, "results", "evaluation", "metrics")
+                        FIGURES_DIR = os.path.join(EXP_DIR, "results", "evaluation", "figures")
 
-                    CENTRAL_EXP_MODELS_DIR = os.path.join(project_root, "models", os.path.basename(EXP_DIR))
-                    os.makedirs(CENTRAL_EXP_MODELS_DIR, exist_ok=True)
+                        CENTRAL_EXP_MODELS_DIR = os.path.join(project_root, "models", os.path.basename(EXP_DIR))
+                        os.makedirs(CENTRAL_EXP_MODELS_DIR, exist_ok=True)
 
-                    aggregated_results = []
-                    aggregated_results_performance = []
-                    aggregated_results_out_of_range = []
-                    aggregated_results_number_of_points = []
+                        aggregated_results = []
+                        aggregated_results_performance = []
+                        aggregated_results_out_of_range = []
+                        aggregated_results_number_of_points = []
 
-                    for i in range(k_folds):
-                        current_fold = i + 1
-                        current_name = f"{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{current_fold}"
-                        data_file_path = f"{windows_path}windows_with_5folds_{dataset_name}_PH{current_horizon}.parquet"
+                        for i in range(k_folds):
+                            current_fold = i + 1
+                            current_name = f"{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_Fold{current_fold}"
+                            data_file_path = f"{windows_path}windows_with_{k_folds}folds_{dataset_name}_H{current_history}_PH{current_horizon}.parquet"
 
-                        print(f"\n---- Loading data for Fold {current_fold}/{k_folds} from: {data_file_path} ----")
-                        df = pd.read_parquet(data_file_path)
+                            print(f"\n---- Loading data for Fold {current_fold}/{k_folds} from: {data_file_path} ----")
+                            df = pd.read_parquet(data_file_path)
 
-                        df_train = df[df[f'fold_{i}'] == 'train']
-                        patients_train_number = df_train['patient_id'].nunique()
-                        df_train = df_train.reset_index(drop=True)[used_columns]
+                            df_train = df[df[f'fold_{i}'] == 'train']
+                            patients_train_number = df_train['patient_id'].nunique()
+                            df_train = df_train.reset_index(drop=True)[used_columns]
 
-                        df_val = df[df[f'fold_{i}'] == 'val']
-                        patients_val_number = df_val['patient_id'].nunique()
-                        df_val = df_val.reset_index(drop=True)[used_columns]
+                            df_val = df[df[f'fold_{i}'] == 'val']
+                            patients_val_number = df_val['patient_id'].nunique()
+                            df_val = df_val.reset_index(drop=True)[used_columns]
 
-                        df_test = df[df[f'fold_{i}'] == 'test']
-                        patients_test_number = df_test['patient_id'].nunique()
-                        df_test_info = df_test.reset_index(drop=True)[info_columns]
-                        df_test = df_test.reset_index(drop=True)[used_columns]
+                            df_test = df[df[f'fold_{i}'] == 'test']
+                            patients_test_number = df_test['patient_id'].nunique()
+                            df_test_info = df_test.reset_index(drop=True)[info_columns]
+                            df_test = df_test.reset_index(drop=True)[used_columns]
 
-                        total_patients = patients_train_number + patients_val_number + patients_test_number
+                            total_patients = patients_train_number + patients_val_number + patients_test_number
 
-                        data_counts = {
-                            "patients": {"train": int(patients_train_number), "val": int(patients_val_number),
-                                         "test": int(patients_test_number)},
-                            "windows": {"train": len(df_train), "val": len(df_val), "test": len(df_test)},
-                            "percent": {
-                                "patients": {"train": (patients_train_number / total_patients * 100),
-                                             "val": (patients_val_number / total_patients * 100),
-                                             "test": (patients_test_number / total_patients * 100)},
-                                "windows": {"train": (len(df_train) / len(df) * 100),
-                                            "val": (len(df_val) / len(df) * 100),
-                                            "test": (len(df_test) / len(df) * 100)}
+                            data_counts = {
+                                "patients": {"train": int(patients_train_number), "val": int(patients_val_number),
+                                             "test": int(patients_test_number)},
+                                "windows": {"train": len(df_train), "val": len(df_val), "test": len(df_test)},
+                                "percent": {
+                                    "patients": {"train": (patients_train_number / total_patients * 100),
+                                                 "val": (patients_val_number / total_patients * 100),
+                                                 "test": (patients_test_number / total_patients * 100)},
+                                    "windows": {"train": (len(df_train) / len(df) * 100),
+                                                "val": (len(df_val) / len(df) * 100),
+                                                "test": (len(df_test) / len(df) * 100)}
+                                }
                             }
-                        }
 
-                        print("\n-- Data Split --")
-                        print(f"  Train: {patients_train_number} patients. Total windows: {len(df_train)}")
-                        print(f"  Val:   {patients_val_number} patients. Total windows: {len(df_val)}")
-                        print(f"  Test:  {patients_test_number} patients. Total windows: {len(df_test)}")
+                            print("\n-- Data Split --")
+                            print(f"  Train: {patients_train_number} patients. Total windows: {len(df_train)}")
+                            print(f"  Val:   {patients_val_number} patients. Total windows: {len(df_val)}")
+                            print(f"  Test:  {patients_test_number} patients. Total windows: {len(df_test)}")
 
-                        x_train, y_train = df_train.iloc[:, :-1].to_numpy(), df_train.iloc[:, -1:].to_numpy()
-                        x_val, y_val = df_val.iloc[:, :-1].to_numpy(), df_val.iloc[:, -1:].to_numpy()
-                        x_test, y_test = df_test.iloc[:, :-1].to_numpy(), df_test.iloc[:, -1:].to_numpy()
-                        del df, df_train, df_val, df_test  # Free memory
+                            x_train, y_train = df_train.iloc[:, :-1].to_numpy(), df_train.iloc[:, -1:].to_numpy()
+                            x_val, y_val = df_val.iloc[:, :-1].to_numpy(), df_val.iloc[:, -1:].to_numpy()
+                            x_test, y_test = df_test.iloc[:, :-1].to_numpy(), df_test.iloc[:, -1:].to_numpy()
+                            del df, df_train, df_val, df_test  # Free memory
 
-                        print(f'\nSTART training {current_algorithm} - Fold={current_fold}')
+                            print(f'\nSTART training {current_algorithm} - H={current_history} | PH={current_horizon} - Fold={current_fold}')
 
-                        # 1. Clean instantiation from architectures.py using the exact default metrics
-                        model = get_compiled_model(
-                            algo_name=current_algorithm,
-                            history_length=history_length,
-                            loss_function=loss_function,
-                            metrics_list=[keras.metrics.RootMeanSquaredError(), ClinicalPenaltyLoss()]
-                        )
+                            # 1. Clean instantiation from architectures.py using the exact default metrics
+                            model = get_compiled_model(
+                                algo_name=current_algorithm,
+                                history_length=current_history,
+                                loss_function=loss_function,
+                                metrics_list=[keras.metrics.RootMeanSquaredError(), ClinicalPenaltyLoss()]
+                            )
 
-                        fold_started_at = datetime.datetime.now()
-                        start_time = time.time()
-                        save_prefix = os.path.join(MODELS_DIR, current_name)
-                        hist, model_trained = train(x_train, y_train, x_val, y_val, model, history_length, save_prefix)
-                        train_time = time.time() - start_time
-                        print(
-                            f'END training {current_algorithm} - Fold={current_fold} (Time: {datetime.timedelta(seconds=train_time)})\n')
-
-                        print('START prediction & saving artifacts...')
-                        weights_file = f"{save_prefix}.weights.h5"
-
-                        # 2. Instantiating model for prediction and loading the saved weights manually
-                        model_load = get_compiled_model(
-                            algo_name=current_algorithm,
-                            history_length=history_length,
-                            loss_function=loss_function,
-                            metrics_list=[keras.metrics.RootMeanSquaredError(), ClinicalPenaltyLoss()]
-                        )
-                        model_load.load_weights(weights_file)
-
-                        start_pred_time = time.time()
-                        if len(model_load.input_shape) == 3:
-                            x_test = x_test.reshape(x_test.shape[0], history_length, 1)
-                        y_pred = model_load.predict(x_test)
-                        pred_time = time.time() - start_pred_time
-
-                        # Concat arrays and tracking indices to generate test vectors
-                        df_res = pd.DataFrame({'y_test': y_test.ravel(), 'y_predict': y_pred.ravel()})
-                        df_res = pd.concat([df_res, df_test_info], axis=1)
-                        preds_path = os.path.join(PRED_DIR, f'df_test_results_vectors_{current_name}.parquet')
-                        df_res.to_parquet(preds_path)
-                        aggregated_results.append(df_res)
-
-                        training_plot_prefix = os.path.join(PLOTS_TRAIN_DIR, current_name)
-                        get_train_plots_loss(hist, training_plot_prefix)
-
-                        hist_csv_path = f"{save_prefix}_history.csv"
-                        best_json_path = f"{save_prefix}.best.json"
-
-                        try:
-                            df_hist = pd.read_csv(hist_csv_path)
-                            best_idx = int(df_hist['val_loss'].idxmin() if 'val_loss' in df_hist.columns else df_hist[
-                                'loss'].idxmin())
-                            row = df_hist.iloc[best_idx].to_dict()
-                            best_payload = {
-                                "monitor": "val_loss" if 'val_loss' in df_hist.columns else "loss",
-                                "epoch_idx": best_idx, "epoch_count": int(df_hist.shape[0]), "metrics": row,
-                                "artifacts": {"weights_path": os.path.abspath(weights_file),
-                                              "history_csv_path": os.path.abspath(hist_csv_path)},
-                                "context": {"loss": loss_function_name, "algorithm": current_algorithm,
-                                            "prediction_horizon": current_horizon, "history_length": history_length,
-                                            "fold": current_fold, "run_id": GLOBAL_RUN_ID},
-                                "created_at": datetime.datetime.now().isoformat()
-                            }
-                            with open(best_json_path, "w", encoding="utf-8") as f:
-                                json.dump(best_payload, f, indent=2)
-                        except Exception as e:
-                            print(f"WARNING: could not write best.json for {current_name}: {e}")
-
-                        write_fold_json_and_md(
-                            EXP_DIR, loss_function_name, current_algorithm, current_horizon, current_fold,
-                            fold_started_at, train_time, datetime.timedelta(seconds=train_time),
-                            pred_time, datetime.timedelta(seconds=pred_time),
-                            weights_path=weights_file, hist_csv_path=hist_csv_path, best_json_path=best_json_path,
-                            preds_parquet_path=preds_path, training_plot_prefix=training_plot_prefix,
-                            history_len=history_length, do_cv=do_cross_validation,
-                            min_sensor=minimum_sensor_reading, max_sensor=maximum_sensor_reading,
-                            data_file_path=data_file_path, data_counts=data_counts
-                        )
-
-                        # Duplicate weights and best.json metadata to the models repository
-                        try:
-                            if os.path.exists(weights_file):
-                                shutil.copy(weights_file, CENTRAL_EXP_MODELS_DIR)
-                            if os.path.exists(best_json_path):
-                                shutil.copy(best_json_path, CENTRAL_EXP_MODELS_DIR)
+                            fold_started_at = datetime.datetime.now()
+                            start_time = time.time()
+                            save_prefix = os.path.join(MODELS_DIR, current_name)
+                            hist, model_trained = train(x_train, y_train, x_val, y_val, model, current_history, save_prefix)
+                            train_time = time.time() - start_time
                             print(
-                                f"Successfully copied fold {current_fold} model artifacts to central hub: {CENTRAL_EXP_MODELS_DIR}")
-                        except Exception as e:
-                            print(f"WARNING: Could not copy model artifacts to central hub: {e}")
+                                f'END training {current_algorithm} - Fold={current_fold} (Time: {datetime.timedelta(seconds=train_time)})\n')
 
-                        print(
-                            f'END prediction & saving artifacts for Fold={current_fold} (Time: {datetime.timedelta(seconds=pred_time)})\n')
+                            print('START prediction & saving artifacts...')
+                            weights_file = f"{save_prefix}.weights.h5"
 
-                    # ------------------ Metric-Then-Aggregate approach ------------------
-                    fold_number = 1
-                    for df_current_result in aggregated_results:
+                            # 2. Instantiating model for prediction and loading the saved weights manually
+                            model_load = get_compiled_model(
+                                algo_name=current_algorithm,
+                                history_length=current_history,
+                                loss_function=loss_function,
+                                metrics_list=[keras.metrics.RootMeanSquaredError(), ClinicalPenaltyLoss()]
+                            )
+                            model_load.load_weights(weights_file)
+
+                            start_pred_time = time.time()
+                            if len(model_load.input_shape) == 3:
+                                x_test = x_test.reshape(x_test.shape[0], current_history, 1)
+                            y_pred = model_load.predict(x_test)
+                            pred_time = time.time() - start_pred_time
+
+                            # Concat arrays and tracking indices to generate test vectors
+                            df_res = pd.DataFrame({'y_test': y_test.ravel(), 'y_predict': y_pred.ravel()})
+                            df_res = pd.concat([df_res, df_test_info], axis=1)
+                            preds_path = os.path.join(PRED_DIR, f'df_test_results_vectors_{current_name}.parquet')
+                            df_res.to_parquet(preds_path)
+                            aggregated_results.append(df_res)
+
+                            training_plot_prefix = os.path.join(PLOTS_TRAIN_DIR, current_name)
+                            get_train_plots_loss(hist, training_plot_prefix)
+
+                            hist_csv_path = f"{save_prefix}_history.csv"
+                            best_json_path = f"{save_prefix}.best.json"
+
+                            try:
+                                df_hist = pd.read_csv(hist_csv_path)
+                                best_idx = int(df_hist['val_loss'].idxmin() if 'val_loss' in df_hist.columns else df_hist[
+                                    'loss'].idxmin())
+                                row = df_hist.iloc[best_idx].to_dict()
+                                best_payload = {
+                                    "monitor": "val_loss" if 'val_loss' in df_hist.columns else "loss",
+                                    "epoch_idx": best_idx, "epoch_count": int(df_hist.shape[0]), "metrics": row,
+                                    "artifacts": {"weights_path": os.path.abspath(weights_file),
+                                                  "history_csv_path": os.path.abspath(hist_csv_path)},
+                                    "context": {"loss": loss_function_name, "algorithm": current_algorithm,
+                                                "prediction_horizon": current_horizon, "history_length": current_history,
+                                                "fold": current_fold, "run_id": GLOBAL_RUN_ID},
+                                    "created_at": datetime.datetime.now().isoformat()
+                                }
+                                with open(best_json_path, "w", encoding="utf-8") as f:
+                                    json.dump(best_payload, f, indent=2)
+                            except Exception as e:
+                                print(f"WARNING: could not write best.json for {current_name}: {e}")
+
+                            write_fold_json_and_md(
+                                EXP_DIR, loss_function_name, current_algorithm, current_horizon, current_fold,
+                                fold_started_at, train_time, datetime.timedelta(seconds=train_time),
+                                pred_time, datetime.timedelta(seconds=pred_time),
+                                weights_path=weights_file, hist_csv_path=hist_csv_path, best_json_path=best_json_path,
+                                preds_parquet_path=preds_path, training_plot_prefix=training_plot_prefix,
+                                history_len=current_history, do_cv=do_cross_validation,
+                                min_sensor=minimum_sensor_reading, max_sensor=maximum_sensor_reading,
+                                data_file_path=data_file_path, data_counts=data_counts
+                            )
+
+                            # Duplicate weights and best.json metadata to the models repository
+                            try:
+                                if os.path.exists(weights_file):
+                                    shutil.copy(weights_file, CENTRAL_EXP_MODELS_DIR)
+                                if os.path.exists(best_json_path):
+                                    shutil.copy(best_json_path, CENTRAL_EXP_MODELS_DIR)
+                                print(
+                                    f"Successfully copied fold {current_fold} model artifacts to central hub: {CENTRAL_EXP_MODELS_DIR}")
+                            except Exception as e:
+                                print(f"WARNING: Could not copy model artifacts to central hub: {e}")
+
+                            print(
+                                f'END prediction & saving artifacts for Fold={current_fold} (Time: {datetime.timedelta(seconds=pred_time)})\n')
+
+                        # ------------------ Metric-Then-Aggregate approach ------------------
+                        fold_number = 1
+                        for df_current_result in aggregated_results:
+                            print()
+                            print('Agregating metrics for fold ', fold_number)
+
+                            df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(
+                                df_result_vector=df_current_result,
+                                grid_name=f'_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_Fold{fold_number}',
+                                show_plot=False,
+                                plot_dir=FIGURES_DIR,
+                                minimum_sensor_reading=minimum_sensor_reading,
+                                maximum_sensor_reading=maximum_sensor_reading
+                            )
+                            df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
+                                                                                f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_Fold{fold_number}.csv'),
+                                                                   index=False)
+                            df_metrics_performance['Fold'] = fold_number
+
+                            df_number_of_points.to_csv(os.path.join(METRICS_DIR,
+                                                                    f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_Fold{fold_number}.csv'),
+                                                       index=False)
+                            df_number_of_points['Fold'] = fold_number
+
+                            df_out_of_limits.to_csv(os.path.join(METRICS_DIR,
+                                                                 f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_Fold{fold_number}.csv'),
+                                                    index=False)
+                            df_out_of_limits['Fold'] = fold_number
+
+                            aggregated_results_performance.append(df_metrics_performance)
+                            aggregated_results_number_of_points.append(df_number_of_points)
+                            aggregated_results_out_of_range.append(df_out_of_limits)
+
+                            print()
+                            print('Aggregated metrics for fold ', fold_number, ' done.')
+                            fold_number += 1
+
                         print()
-                        print('Agregating metrics for fold ', fold_number)
+                        print('Calculating aggregated metrics across folds (Metric-Then-Aggregate)...')
 
-                        df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(
-                            df_current_result,
-                            f'_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{fold_number}',
-                            show_plot=False,
-                            plot_dir=FIGURES_DIR,
-                            minimum_sensor_reading=minimum_sensor_reading,
-                            maximum_sensor_reading=maximum_sensor_reading
-                        )
-                        df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                            f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{fold_number}.csv'),
-                                                               index=False)
-                        df_metrics_performance['Fold'] = fold_number
+                        df_metrics_performance_agg = pd.concat(aggregated_results_performance, ignore_index=True)
+                        df_metrics_performance_agg.round(2).to_csv(os.path.join(METRICS_DIR,
+                                                                                f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_metric_then_aggregate.csv'),
+                                                                   index=False)
+                        df_metrics_performance_agg = df_metrics_performance_agg.drop(columns=['Fold'])
+                        df_metrics_performance_agg_flat, df_metrics_performance_agg_report = fold_results_aggregation(
+                            df_metrics_performance_agg)
+                        df_metrics_performance_agg_flat.round(2).to_csv(os.path.join(METRICS_DIR,
+                                                                                     f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_flat.csv'),
+                                                                        index=False)
+                        df_metrics_performance_agg_report.round(2).to_csv(os.path.join(METRICS_DIR,
+                                                                                       f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_report.csv'),
+                                                                          index=False)
 
-                        df_number_of_points.to_csv(os.path.join(METRICS_DIR,
-                                                                f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{fold_number}.csv'),
+                        df_number_of_points_agg = pd.concat(aggregated_results_number_of_points, ignore_index=True)
+                        df_number_of_points_agg.to_csv(os.path.join(METRICS_DIR,
+                                                                    f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_metric_then_aggregate.csv'),
+                                                       index=False)
+                        df_number_of_points_agg = df_number_of_points_agg.drop(columns=['Fold'])
+                        df_number_of_points_agg_flat, df_number_of_points_report = fold_results_aggregation(
+                            df_number_of_points_agg)
+                        df_number_of_points_agg_flat.to_csv(os.path.join(METRICS_DIR,
+                                                                         f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_flat.csv'),
+                                                            index=False)
+                        df_number_of_points_report.to_csv(os.path.join(METRICS_DIR,
+                                                                       f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_report.csv'),
+                                                          index=False)
+
+                        df_out_of_range_agg = pd.concat(aggregated_results_out_of_range, ignore_index=True)
+                        df_out_of_range_agg.to_csv(os.path.join(METRICS_DIR,
+                                                                f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_metric_then_aggregate.csv'),
                                                    index=False)
-                        df_number_of_points['Fold'] = fold_number
-
-                        df_out_of_limits.to_csv(os.path.join(METRICS_DIR,
-                                                             f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_Fold{fold_number}.csv'),
-                                                index=False)
-                        df_out_of_limits['Fold'] = fold_number
-
-                        aggregated_results_performance.append(df_metrics_performance)
-                        aggregated_results_number_of_points.append(df_number_of_points)
-                        aggregated_results_out_of_range.append(df_out_of_limits)
-
-                        print()
-                        print('Aggregated metrics for fold ', fold_number, ' done.')
-                        fold_number += 1
-
-                    print()
-                    print('Calculating aggregated metrics across folds (Metric-Then-Aggregate)...')
-
-                    df_metrics_performance_agg = pd.concat(aggregated_results_performance, ignore_index=True)
-                    df_metrics_performance_agg.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                            f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_metric_then_aggregate.csv'),
-                                                               index=False)
-                    df_metrics_performance_agg = df_metrics_performance_agg.drop(columns=['Fold'])
-                    df_metrics_performance_agg_flat, df_metrics_performance_agg_report = fold_results_aggregation(
-                        df_metrics_performance_agg)
-                    df_metrics_performance_agg_flat.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                                 f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_flat.csv'),
-                                                                    index=False)
-                    df_metrics_performance_agg_report.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                                   f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_report.csv'),
-                                                                      index=False)
-
-                    df_number_of_points_agg = pd.concat(aggregated_results_number_of_points, ignore_index=True)
-                    df_number_of_points_agg.to_csv(os.path.join(METRICS_DIR,
-                                                                f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_metric_then_aggregate.csv'),
-                                                   index=False)
-                    df_number_of_points_agg = df_number_of_points_agg.drop(columns=['Fold'])
-                    df_number_of_points_agg_flat, df_number_of_points_report = fold_results_aggregation(
-                        df_number_of_points_agg)
-                    df_number_of_points_agg_flat.to_csv(os.path.join(METRICS_DIR,
-                                                                     f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_flat.csv'),
+                        df_out_of_range_agg = df_out_of_range_agg.drop(columns=['Fold'])
+                        df_out_of_range_agg_flat, df_out_of_range_report = fold_results_aggregation(df_out_of_range_agg)
+                        df_out_of_range_agg_flat.to_csv(os.path.join(METRICS_DIR,
+                                                                     f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_flat.csv'),
                                                         index=False)
-                    df_number_of_points_report.to_csv(os.path.join(METRICS_DIR,
-                                                                   f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_report.csv'),
+                        df_out_of_range_report.to_csv(os.path.join(METRICS_DIR,
+                                                                   f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_report.csv'),
                                                       index=False)
 
-                    df_out_of_range_agg = pd.concat(aggregated_results_out_of_range, ignore_index=True)
-                    df_out_of_range_agg.to_csv(os.path.join(METRICS_DIR,
-                                                            f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_metric_then_aggregate.csv'),
-                                               index=False)
-                    df_out_of_range_agg = df_out_of_range_agg.drop(columns=['Fold'])
-                    df_out_of_range_agg_flat, df_out_of_range_report = fold_results_aggregation(df_out_of_range_agg)
-                    df_out_of_range_agg_flat.to_csv(os.path.join(METRICS_DIR,
-                                                                 f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_flat.csv'),
-                                                    index=False)
-                    df_out_of_range_report.to_csv(os.path.join(METRICS_DIR,
-                                                               f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_metric_then_aggregate_report.csv'),
-                                                  index=False)
+                        print('Aggregated metrics across folds (Metric-Then-Aggregate) calculated and saved.')
+                        print()
 
-                    print('Aggregated metrics across folds (Metric-Then-Aggregate) calculated and saved.')
-                    print()
+                        # ------------------ Aggregate-Then-Metric approach ------------------
+                        print()
+                        print('Calculating aggregated metrics across folds (Aggregate-Then-Metric)...')
 
-                    # ------------------ Aggregate-Then-Metric approach ------------------
-                    print()
-                    print('Calculating aggregated metrics across folds (Aggregate-Then-Metric)...')
+                        df_all_folds = pd.concat(aggregated_results, ignore_index=True)
+                        df_all_folds.to_parquet(os.path.join(PRED_DIR,
+                                                             f'df_test_results_vectors_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}.parquet'))
+                        print(f'\nAggregated all {k_folds} folds. Total rows: {len(df_all_folds)}')
 
-                    df_all_folds = pd.concat(aggregated_results, ignore_index=True)
-                    df_all_folds.to_parquet(os.path.join(PRED_DIR,
-                                                         f'df_test_results_vectors_{loss_function_name}_{current_algorithm}_H{current_horizon}.parquet'))
-                    print(f'\nAggregated all {k_folds} folds. Total rows: {len(df_all_folds)}')
+                        df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(df_all_folds,
+                                                                                                      f'_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL',
+                                                                                                      show_plot=True,
+                                                                                                      plot_dir=FIGURES_DIR,
+                                                                                                      minimum_sensor_reading=minimum_sensor_reading,
+                                                                                                      maximum_sensor_reading=maximum_sensor_reading)
+                        df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
+                                                                            f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_agregate_then_metric.csv'),
+                                                               index=False)
+                        df_number_of_points.to_csv(os.path.join(METRICS_DIR,
+                                                                f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_agregate_then_metric.csv'),
+                                                   index=False)
+                        df_out_of_limits.to_csv(os.path.join(METRICS_DIR,
+                                                             f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_agregate_then_metric.csv'),
+                                                index=False)
+                        print('Metrics for all folds calculated and saved.')
 
-                    df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(df_all_folds,
-                                                                                                  f'_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL',
-                                                                                                  show_plot=True,
-                                                                                                  plot_dir=FIGURES_DIR,
-                                                                                                  minimum_sensor_reading=minimum_sensor_reading,
-                                                                                                  maximum_sensor_reading=maximum_sensor_reading)
-                    df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                        f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_agregate_then_metric.csv'),
-                                                           index=False)
-                    df_number_of_points.to_csv(os.path.join(METRICS_DIR,
-                                                            f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_agregate_then_metric.csv'),
-                                               index=False)
-                    df_out_of_limits.to_csv(os.path.join(METRICS_DIR,
-                                                         f'predictions_out_of_limits_{loss_function_name}_{current_algorithm}_H{current_horizon}_ALL_agregate_then_metric.csv'),
-                                            index=False)
-                    print('Metrics for all folds calculated and saved.')
+                        write_experiment_readme(EXP_DIR, loss_function_name, current_algorithm, current_horizon,
+                                                current_history, experiment_context, k_folds)
+                        print(f"Main README.md created at: {os.path.join(EXP_DIR, 'README.md')}")
 
-                    write_experiment_readme(EXP_DIR, loss_function_name, current_algorithm, current_horizon,
-                                            history_length, experiment_context, k_folds)
-                    print(f"Main README.md created at: {os.path.join(EXP_DIR, 'README.md')}")
+                        print(f"================\nFinished Experiment: {os.path.basename(EXP_DIR)}\n================\n\n")
 
-                    print(f"================\nFinished Experiment: {os.path.basename(EXP_DIR)}\n================\n\n")
-
-                finally:
-                    if exp_log_file:
-                        exp_log_file.close()
-                    sys.stdout = sys.stderr = Tee(original_stdout)
+                    finally:
+                        if exp_log_file:
+                            exp_log_file.close()
+                        sys.stdout = sys.stderr = Tee(original_stdout)
 
 finally:
     print("All experiments finished.")
