@@ -1,10 +1,30 @@
 # -*- coding: utf-8 -*-
 """
 Execution script to generate temporal windows and cross-validation folds.
-This script strictly follows the data preparation steps from generate_windows.py
+This script strictly follows the data preparation steps from generate_windows.py,
+using an external YAML configuration file for reproducibility.
 """
 
+# ---------------------------------------------------------
+# SYSTEM PATH CONFIGURATION (Essential for Remote Server)
+# ---------------------------------------------------------
 import os
+import sys
+
+# Get the absolute path of the directory containing this script (scripts/)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Get the parent directory and append it to sys.path
+project_root = os.path.abspath(os.path.join(current_dir, ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# ---------------------------------------------------------
+# IMPORTS STANDARD, THIRD-PARTY, AND  INTERNAL MODULAR LIBRARY
+# ---------------------------------------------------------
+import argparse
+from pathlib import Path
+import yaml
 import pandas as pd
 
 # Import our custom modules from the 'src' directory
@@ -15,79 +35,104 @@ from src.data.make_folds import (
     tag_folds_and_save
 )
 
+# Get the absolute path to the folder where this script is located ('scripts')
+SCRIPT_DIR = Path(__file__).resolve().parent
+# Get the absolute path to the project root (one level up from 'scripts')
+PROJECT_ROOT = SCRIPT_DIR.parent
+# Build the path to 'configs/preprocessing_prediction_data.yaml' at the root
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "preprocessing_prediction_data.yaml"
+
+
+def parse_arguments():
+    """Configure and read the CLI arguments."""
+    parser = argparse.ArgumentParser(description="Pipeline to generate temporal windows using a YAML config.")
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=str(DEFAULT_CONFIG),
+        help="Path to the YAML configuration file."
+    )
+    return parser.parse_args()
+
+
 # ==========================================
-# 1. CONFIGURATION AND HYPERPARAMETERS
+# MAIN PIPELINE
 # ==========================================
-DATASET_NAME = "DiaTrend"
+def main(config_path):
+    # --- Read configuration from YAML file ---
+    print(f"Reading configuration from: {config_path}")
+    with open(config_path, 'r', encoding='utf-8') as file:
+        config = yaml.safe_load(file)
 
-# List of historical data to test (in 15-minute increments)
-# 4 = 1 hour, 6 = 1.5 hours, 8 = 2 hours, 12 = 3 hours
-HISTORY_LENGTHS = [2, 4, 6, 8, 12]  # 2 for 30 min, 4 for 60 min, etc.
-HORIZONS = [2, 4]  # 2 for 30 min, 4 for 60 min, etc.
+    # --- Extract variables ---
+    # Bloque: dataset
+    dataset_name = config['dataset']['name']
+    glucose_column_name = config['dataset']['glucose_column']
+    id_column_name = config['dataset']['id_column']
 
-DEDUPLICATE_INTRA_PATIENT = True
-K_FOLDS = 5
-RANDOM_SEED = 42
+    # Bloque: hyperparameters
+    history_lengths = config['hyperparameters']['history_lengths']
+    horizons = config['hyperparameters']['horizons']
 
-GLUCOSE_COLUMN_NAME = '15min'
-ID_COLUMN_NAME = 'patient_id'
+    # Bloque: folds
+    k_folds = config['folds']['k_folds']
+    random_seed = config['folds']['random_seed']
+    # Como en el YAML se llama 'disable_deduplication' (true/false),
+    # invertimos el booleano si tu variable indica si SE deduplica o no:
+    deduplicate_intra_patient = not config['folds']['disable_deduplication']
 
-PATH_TO_LOAD_DATA = '/home/cirorodriguezleon/RELIEF-T1D/datasets/After_2025-10-03/Preprocessed/diatrend/Final_versions_V4/Filtered_for_prediction/Glucose_measurements_DiaTrend_FILTERED_2026-03-27.parquet'
-BASE_OUTPUT_DIR = '/home/cirorodriguezleon/RELIEF-T1D/datasets/After_2025-10-03/Preprocessed/diatrend/Final_versions_V4/Filtered_for_prediction/windows/extra_fields/2026-03-27-H_others/'
+    # Bloque: paths
+    path_to_load_data = config['paths']['path_to_load']
+    base_output_dir = config['paths']['base_output_dir']
 
-
-# ==========================================
-# 2. MAIN PIPELINE
-# ==========================================
-def main():
-    print(f"--- Starting data generation pipeline for {DATASET_NAME} ---")
+    print(f"--- Starting data generation pipeline for {dataset_name} ---")
 
     # --- Automatically create the two subdirectories within the base path ---
-    path_pure_windows = os.path.join(BASE_OUTPUT_DIR, 'windows/')
-    path_folds = os.path.join(BASE_OUTPUT_DIR, 'folds/')
+    path_pure_windows = os.path.join(base_output_dir, 'windows/')
+    path_folds = os.path.join(base_output_dir, 'folds/')
 
     os.makedirs(path_pure_windows, exist_ok=True)
     os.makedirs(path_folds, exist_ok=True)
 
     # 2.1 Load and prepare the raw data
-    print(f"Loading raw data from: {PATH_TO_LOAD_DATA}")
-    df_data = pd.read_parquet(PATH_TO_LOAD_DATA)
+    print(f"Loading raw data from: {path_to_load_data}")
+    df_data = pd.read_parquet(path_to_load_data)
 
     # Filter valid rows (15min is not NaT)
-    df_valid_rows = df_data[df_data[GLUCOSE_COLUMN_NAME].notna()]
+    df_valid_rows = df_data[df_data[glucose_column_name].notna()]
 
-    # Sort columns by ID_COLUMN_NAME and GLUCOSE_COLUMN_NAME
-    df_valid_rows = df_valid_rows.sort_values(by=[ID_COLUMN_NAME, GLUCOSE_COLUMN_NAME])
+    # Sort columns by ID and Glucose column
+    df_valid_rows = df_valid_rows.sort_values(by=[id_column_name, glucose_column_name])
     df_valid_rows.reset_index(drop=True, inplace=True)  # Reset index after filtering
 
-    # Group by ID_COLUMN_NAME and convert 'Measurement' to numpy array
+    # Group by ID and convert 'measurement' to numpy array
     patient_dict = {
         pid: group['measurement'].to_numpy()
-        for pid, group in df_valid_rows.groupby(ID_COLUMN_NAME)
+        for pid, group in df_valid_rows.groupby(id_column_name)
     }
 
-    # Group by ID_COLUMN_NAME and convert GLUCOSE_COLUMN_NAME to numpy array of dates
+    # Group by ID and convert glucose column to numpy array of dates
     date_dict = {
-        pid: group[GLUCOSE_COLUMN_NAME].dt.date.to_numpy()
-        for pid, group in df_valid_rows.groupby(ID_COLUMN_NAME)
+        pid: group[glucose_column_name].dt.date.to_numpy()
+        for pid, group in df_valid_rows.groupby(id_column_name)
     }
 
-    # Group by ID_COLUMN_NAME and convert GLUCOSE_COLUMN_NAME to numpy array of times
+    # Group by ID and convert glucose column to numpy array of times
     time_dict = {
-        pid: group[GLUCOSE_COLUMN_NAME].dt.time.to_numpy()
-        for pid, group in df_valid_rows.groupby(ID_COLUMN_NAME)
+        pid: group[glucose_column_name].dt.time.to_numpy()
+        for pid, group in df_valid_rows.groupby(id_column_name)
     }
     # =========================================================================
 
     print(f"Number of patients with valid data: {len(patient_dict)}")
 
-    # 2.2 Iterate over each history lengths 
-    for current_history in HISTORY_LENGTHS:
+    # 2.2 Iterate over each history lengths
+    for current_history in history_lengths:
         print(f"\n====================================================================")
         print(f" 🕒 RUNNING HISTORY LENGTH (H): {current_history} steps ({current_history * 15} mins)")
         print(f"====================================================================")
 
-        for current_horizon in HORIZONS:
+        for current_horizon in horizons:
             print(f"\n  -> Processing Combination: H={current_history} | PH={current_horizon}")
             print(f"  --------------------------------------------------")
 
@@ -97,27 +142,27 @@ def main():
                 bgl_measurement_dict=patient_dict,
                 history_length=current_history,
                 horizon=current_horizon,
-                deduplicate_intra_patient=DEDUPLICATE_INTRA_PATIENT,
+                deduplicate_intra_patient=deduplicate_intra_patient,
                 date_dict=date_dict,
                 time_dict=time_dict
             )
             print(f"  Total windows generated: {len(df_pure_windows)}")
 
-            # --- Step B: Save Pure Windows (ONLY windows, dates, times and patient_id) ---
-            pure_filename = f"windows_H{current_history}_PH{current_horizon}_{DATASET_NAME}.parquet"
+            # --- Step B: Save Pure Windows ---
+            pure_filename = f"windows_H{current_history}_PH{current_horizon}_{dataset_name}.parquet"
             pure_filepath = os.path.join(path_pure_windows, pure_filename)
             df_pure_windows.to_parquet(pure_filepath, index=False)
             print(f"  ✓ Pure windows saved to: {pure_filename}")
 
             # --- Step C: Calculate patient loads (window counts) ---
-            patient_window_counts = df_pure_windows[ID_COLUMN_NAME].value_counts().to_dict()
+            patient_window_counts = df_pure_windows[id_column_name].value_counts().to_dict()
 
             # --- Step D: Create Folds ---
-            print(f"  Creating {K_FOLDS}-fold patient-wise splits...")
+            print(f"  Creating {k_folds}-fold patient-wise splits...")
             folds_split = make_folds_greedy_splits_valanced_priority(
                 patient_windows=patient_window_counts,
-                k=K_FOLDS,
-                seed=RANDOM_SEED
+                k=k_folds,
+                seed=random_seed
             )
 
             # --- Step E: Validate Folds ---
@@ -127,12 +172,12 @@ def main():
                 horizon=current_horizon
             )
 
-            # --- Step F: Tag and Save to Parquet (Windows + 5-Fold columns added) ---
+            # --- Step F: Tag and Save to Parquet (Windows + K-Fold columns added) ---
             tag_folds_and_save(
                 df_windows=df_pure_windows,
                 folds=folds_split,
                 output_path=path_folds,
-                filename=f"windows_with_5folds_{DATASET_NAME}_H{current_history}",
+                filename=f"windows_with_{k_folds}folds_{dataset_name}_H{current_history}",
                 horizon=current_horizon
             )
 
@@ -140,4 +185,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Parse CLI arguments to get the config file path
+    cli_args = parse_arguments()
+
+    # Run the main pipeline passing the config path
+    main(cli_args.config)
