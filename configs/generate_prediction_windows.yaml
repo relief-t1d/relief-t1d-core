@@ -8,8 +8,8 @@ dataset:
   id_column: "patient_id"
 
 hyperparameters:
-  history_lengths: [2, 8]
-  horizons: [2, 4]
+  history_lengths: [16] # Options: [2, 4, 8, 12, 16, 20, ...]
+  horizons: [8] # Options: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]
 
 folds:
   k_folds: 5
@@ -17,5 +17,5 @@ folds:
   disable_deduplication: false
 
 paths:
-  path_to_load: "c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/Datasets/Preprocessed/diatrend/Final_versions_V4/Filtered_for_prediction/Glucose_measurements_DiaTrend_FILTERED_2026-03-27.parquet"
-  base_output_dir: "c:/Users/Ciro/Mi Unidad (PDI)/_UGR_PDI_2024-05-30/RELIEF-T1D/Python_projects/Relief-T1D_src/datasets/"
+  path_to_load: "../Final_versions_V4/Filtered_for_prediction/Glucose_measurements_DiaTrend_FILTERED_2026-03-27.parquet"
+  base_output_dir: "../datasets/"

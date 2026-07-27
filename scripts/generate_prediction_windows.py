@@ -29,8 +29,8 @@ import yaml
 import pandas as pd
 
 # Import our custom modules from the 'src' directory
-from src.data.make_windows import get_windows_one_step_walk_forward
-from src.data.make_folds import (
+from src.preprocessing.make_windows import get_windows_one_step_walk_forward
+from src.preprocessing.make_folds import (
     make_folds_greedy_splits_valanced_priority,
     validate_folds,
     tag_folds_and_save
@@ -41,7 +41,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # Get the absolute path to the project root (one level up from 'scripts')
 PROJECT_ROOT = SCRIPT_DIR.parent
 # Build the path to 'configs/preprocessing_prediction_data.yaml' at the root
-DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "preprocessing_prediction_data.yaml"
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "generate_prediction_windows.yaml"
 
 
 class Tee(object):
