@@ -1,22 +1,47 @@
 # -*- coding: utf-8 -*-
 """
-RELIEF-T1D — Refactored Training
-Root-level script orchestrating cross-validation, training, and clinical evaluation.
+RELIEF-T1D: Model Training and Evaluation Pipeline
+
+This script orchestrates the end-to-end training process for blood glucose
+prediction models. It handles the loading of preprocessed temporal windows,
+model instantiation (e.g., LSTMs, CNNs), k-fold cross-validation, and
+comprehensive evaluation using both statistical and clinical metrics.
+
+All experiment hyperparameters, sensor limits, and paths are governed by
+an external YAML configuration file for full reproducibility.
 """
 
-# ---------------------------------------------------------
-# 1. SYSTEM PATH CONFIGURATION (Essential for Remote Server)
-# ---------------------------------------------------------
 import os
 import sys
+import argparse
+import yaml
+from pathlib import Path
 
-# Get the absolute path of the directory containing this script (scripts/)
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# ---------------------------------------------------------
+# 1. SYSTEM PATH AND CONFIGURATION LOADING
+# ---------------------------------------------------------
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# Get the parent directory (Main Repo/) and append it to sys.path
-project_root = os.path.abspath(os.path.join(current_dir, ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "train_prediction_models.yaml"
+
+def parse_arguments():
+    """Parse CLI arguments for configuration injection."""
+    parser = argparse.ArgumentParser(description="Training script using YAML config.")
+    parser.add_argument(
+        '--config',
+        type=str,
+        default=str(DEFAULT_CONFIG),
+        help="Path to the YAML configuration file."
+    )
+    return parser.parse_args()
+
+# Load the configuration file early
+cli_args = parse_arguments()
+with open(cli_args.config, 'r', encoding='utf-8') as f:
+    config = yaml.safe_load(f)
 
 # ---------------------------------------------------------
 # 2. GLOBAL REPRODUCIBILITY AND DETERMINISM (Before TensorFlow)
@@ -24,22 +49,23 @@ if project_root not in sys.path:
 import random
 import numpy as np
 
-GLOBAL_SEED = 50
+# Extract seed from config (using lowercase as it's a dynamic variable)
+global_seed = config['experiment']['random_seed']
 
 # Force GPU and environment to be deterministic BEFORE loading TensorFlow
-os.environ['PYTHONHASHSEED'] = str(GLOBAL_SEED)
+os.environ['PYTHONHASHSEED'] = str(global_seed)
 os.environ['TF_DETERMINISTIC_OPS'] = '1'
 os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 # Set core Python and NumPy seeds
-random.seed(GLOBAL_SEED)
-np.random.seed(GLOBAL_SEED)
+random.seed(global_seed)
+np.random.seed(global_seed)
 
 # Now it is safe to import TensorFlow and set its global seeds
 import tensorflow as tf
-tf.random.set_seed(GLOBAL_SEED)
-tf.keras.utils.set_random_seed(GLOBAL_SEED)
+tf.random.set_seed(global_seed)
+tf.keras.utils.set_random_seed(global_seed)
 from tensorflow import keras
 
 # ---------------------------------------------------------
@@ -63,7 +89,10 @@ from src.models.losses import *
 from src.models.architectures import get_compiled_model
 from src.evaluation.metrics import test_by_range, get_train_plots_loss, fold_results_aggregation
 
-# ----------------------- Custom losses mapping -----------------------
+# ---------------------------------------------------------
+# 5. CONFIGURATION VARIABLES INJECTION
+# ---------------------------------------------------------
+# (The mapping dictionary remains in code as it maps string keys to actual Python functions)
 loss_functions_dic = {
     "cSigP01": c_sig_p01,
     "cSigP06": c_sig_p06,
@@ -73,51 +102,49 @@ loss_functions_dic = {
     "cSigMSEP01": c_sig_p01_MSE,
     "cSigMSEP06": c_sig_p06_MSE,
 }
-loss_function_name_list = ['RMSE'] # Single loss function
-# loss_function_name_list = ['RMSE', 'cSigP01', 'cSigP06', 'gMSE', 'gMAD', 'cSigMSEP01', 'cSigMSEP06']  # All loss functions
 
-# ----------------------- Config -----------------------
-batch_size = 4096
-patience = 10
-max_epoch = 500
-dropout = 0.1
-recurrent_dropout = 0.0
+# Extracting experiment configuration
+loss_function_name_list = config['experiment']['loss_functions']
+algorithms = config['experiment']['algorithms']
+history_length_list = config['experiment']['history_lengths']
+horizons = config['experiment']['horizons']
+do_cross_validation = config['experiment']['do_cross_validation']
+k_folds = config['experiment']['k_folds']
 
-# windows_path = os.path.join(os.sep, 'opt', 'datasets', 'folds', 'T1DiabetesGranada') + os.sep
-windows_path = 'c:/Users/Ciro/C/_UGR_PDI/RELIEF-T1D/Datasets/2025-12-05/Preprocessed/diatrend/Final_versions_V4/Filtered_for_prediction/windows/extra_fields/5folds/'
-experiment_base_path = '../experiments/'
+# Extracting training hyperparameters
+batch_size = config['training_hyperparameters']['batch_size']
+patience = config['training_hyperparameters']['patience']
+max_epoch = config['training_hyperparameters']['max_epoch']
+dropout = config['training_hyperparameters']['dropout']
+recurrent_dropout = config['training_hyperparameters']['recurrent_dropout']
 
-history_length_list = [8]
-do_cross_validation = True
-# horizons = [2, 4, 6, 8, 12, 16]
-horizons = [4]
-# algorithms = ['Linear', 'LSTM', 'CNN']
-algorithms = ['LSTM']
+# Extracting sensor limits
+minimum_sensor_reading = config['sensor_limits']['minimum_reading']
+maximum_sensor_reading = config['sensor_limits']['maximum_reading']
 
+# Extracting paths
+windows_path = config['paths']['windows_path']
+experiment_base_path = config['paths']['experiment_base_path']
+central_models_path = config['paths']['central_models_path']
 
-maximum_sensor_reading = 401  # Diatrend and REPLACE-BG
-# maximum_sensor_reading = 500 # T1DiabetesGranada
-minimum_sensor_reading = 39  # Diatrend and REPLACE-BG
-# minimum_sensor_reading = 40 # T1DiabetesGranada
+# ---------------------------------------------------------
+# 6. METADATA AND LOGGING VARIABLES (README)
+# ---------------------------------------------------------
+experiment_context = config['metadata']['experiment_context']
 
-# ----------------------- Specific variables for readme -----------------------
-experiment_context = "context"
+dataset_name = config['metadata']['dataset_name']
+dataset_version = config['metadata']['dataset_version']
+dataset_link = config['metadata']['dataset_link']
 
-# Dataset
-dataset_name = 'DiaTrend'
-dataset_version = 'General'
-dataset_link = 'link/to/ids'
+training_data = config['metadata']['training_data']
+validation_data = config['metadata']['validation_data']
+testing_data = config['metadata']['testing_data']
+wise_level = config['metadata']['wise_level']
+patient_ids_link = config['metadata']['patient_ids_link']
 
-# Experiment configuration
-training_data = '70% T1DiabetesGranada'
-validation_data = '10% T1DiabetesGranada'
-testing_data = '200% T1DiabetesGranada'
+# Dynamic variables based on experiment setup
 cross_validation = 'k-fold' if do_cross_validation else 'No'
-Folds = '5' if do_cross_validation else '1'
-wise_level = 'patient'
-patient_ids_link = 'link/to/patient_id'
-
-
+Folds = str(k_folds) if do_cross_validation else '1'
 
 # ----------------------- Console Tee Logic -----------------------
 class Tee:
@@ -365,7 +392,7 @@ try:
                 tf.random.set_seed(50)
                 random.seed(50)
                 used_columns = [f"x{i}" for i in range(current_history)] + ["y"]
-                info_columns = ['patient_id', 'x_time_7', 'x_date_7']
+                info_columns = ['patient_id', f"x{current_history - 1}_time", f"x{current_history - 1}_date"]
                 k_folds = 5 if do_cross_validation else 1
 
                 for current_algorithm in algorithms:
@@ -388,7 +415,7 @@ try:
                         METRICS_DIR = os.path.join(EXP_DIR, "results", "evaluation", "metrics")
                         FIGURES_DIR = os.path.join(EXP_DIR, "results", "evaluation", "figures")
 
-                        CENTRAL_EXP_MODELS_DIR = os.path.join(project_root, "models", os.path.basename(EXP_DIR))
+                        CENTRAL_EXP_MODELS_DIR = os.path.join(central_models_path, os.path.basename(EXP_DIR))
                         os.makedirs(CENTRAL_EXP_MODELS_DIR, exist_ok=True)
 
                         aggregated_results = []
@@ -404,15 +431,15 @@ try:
                             print(f"\n---- Loading data for Fold {current_fold}/{k_folds} from: {data_file_path} ----")
                             df = pd.read_parquet(data_file_path)
 
-                            df_train = df[df[f'fold_{i}'] == 'train']
+                            df_train = df[df[f'fold{i}'] == 'train']
                             patients_train_number = df_train['patient_id'].nunique()
                             df_train = df_train.reset_index(drop=True)[used_columns]
 
-                            df_val = df[df[f'fold_{i}'] == 'val']
+                            df_val = df[df[f'fold{i}'] == 'val']
                             patients_val_number = df_val['patient_id'].nunique()
                             df_val = df_val.reset_index(drop=True)[used_columns]
 
-                            df_test = df[df[f'fold_{i}'] == 'test']
+                            df_test = df[df[f'fold{i}'] == 'test']
                             patients_test_number = df_test['patient_id'].nunique()
                             df_test_info = df_test.reset_index(drop=True)[info_columns]
                             df_test = df_test.reset_index(drop=True)[used_columns]
