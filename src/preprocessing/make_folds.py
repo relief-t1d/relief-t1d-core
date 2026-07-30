@@ -156,10 +156,12 @@ def validate_folds(folds: List[Fold], patient_measurements: Dict[str, int], tole
 
 def tag_folds_and_save(
         df_windows: pd.DataFrame,
-        folds: List[Fold],
+        folds_splits: List[Fold],
         output_path: str,
-        filename: str = "windows_with_5folds_",
-        horizon: int = 2,
+        dataset_name: str,
+        historic: str,
+        horizon: int,
+        k_folds: int = 5,
         column_prefix: str = "fold") -> None:
     """
     Add one column per fold (fold0 … fold{k-1}) indicating whether each window
@@ -168,7 +170,7 @@ def tag_folds_and_save(
     """
     df_tagged = df_windows.copy()
 
-    for idx, fold in enumerate(folds):
+    for idx, fold in enumerate(folds_splits):
         # Build a mapping patient_id -> split label for this fold
         label_map = {pid: "train" for pid in fold["train"]}
         label_map.update({pid: "val" for pid in fold["val"]})
@@ -180,8 +182,8 @@ def tag_folds_and_save(
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    df_tagged.to_parquet(f'{output_path}{filename}_PH{horizon}.parquet', index=False)
-    print(f"\n ✓ File {filename}_horizon_{horizon} written: {output_path}"
-          f"({len(df_windows):,} rows, {len(folds)} fold-columns)")
+    df_tagged.to_parquet(f'{output_path}{dataset_name}_H{historic}_PH{horizon}_kfold{k_folds}.parquet', index=False)
+    print(f"\n ✓ File {dataset_name}_horizon_{horizon} written: {output_path}"
+          f"({len(df_windows):,} rows, {len(folds_splits)} fold-columns)")
 
     return df_tagged

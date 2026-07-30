@@ -16,6 +16,10 @@ import sys
 import argparse
 import yaml
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from a local .env file into os.environ if present
+load_dotenv()
 
 # ---------------------------------------------------------
 # 1. SYSTEM PATH AND CONFIGURATION LOADING
@@ -25,7 +29,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "train_prediction_models.yaml"
+DEFAULT_CONFIG = PROJECT_ROOT / "config" / "train_prediction_models.yaml"
 
 def parse_arguments():
     """Parse CLI arguments for configuration injection."""
@@ -38,10 +42,12 @@ def parse_arguments():
     )
     return parser.parse_args()
 
-# Load the configuration file early
+# Load the configuration file and dynamically expand environment variables (e.g., ${PATH_TO_DATA})
 cli_args = parse_arguments()
 with open(cli_args.config, 'r', encoding='utf-8') as f:
-    config = yaml.safe_load(f)
+    raw_yaml_content = f.read()
+    expanded_yaml_content = os.path.expandvars(raw_yaml_content)
+    config = yaml.safe_load(expanded_yaml_content)
 
 # ---------------------------------------------------------
 # 2. GLOBAL REPRODUCIBILITY AND DETERMINISM (Before TensorFlow)
@@ -49,7 +55,7 @@ with open(cli_args.config, 'r', encoding='utf-8') as f:
 import random
 import numpy as np
 
-# Extract seed from config (using lowercase as it's a dynamic variable)
+# Extract seed from config
 global_seed = config['experiment']['random_seed']
 
 # Force GPU and environment to be deterministic BEFORE loading TensorFlow
@@ -92,7 +98,7 @@ from src.evaluation.metrics import test_by_range, get_train_plots_loss, fold_res
 # ---------------------------------------------------------
 # 5. CONFIGURATION VARIABLES INJECTION
 # ---------------------------------------------------------
-# (The mapping dictionary remains in code as it maps string keys to actual Python functions)
+# Mapping dictionary linking string keys in YAML to concrete loss functions in Python
 loss_functions_dic = {
     "cSigP01": c_sig_p01,
     "cSigP06": c_sig_p06,
@@ -130,17 +136,13 @@ central_models_path = config['paths']['central_models_path']
 # ---------------------------------------------------------
 # 6. METADATA AND LOGGING VARIABLES (README)
 # ---------------------------------------------------------
-experiment_context = config['metadata']['experiment_context']
-
 dataset_name = config['metadata']['dataset_name']
-dataset_version = config['metadata']['dataset_version']
-dataset_link = config['metadata']['dataset_link']
+dataset_link = config['metadata']['link']
 
 training_data = config['metadata']['training_data']
 validation_data = config['metadata']['validation_data']
 testing_data = config['metadata']['testing_data']
 wise_level = config['metadata']['wise_level']
-patient_ids_link = config['metadata']['patient_ids_link']
 
 # Dynamic variables based on experiment setup
 cross_validation = 'k-fold' if do_cross_validation else 'No'
@@ -270,14 +272,15 @@ def next_versioned_dir(base_name: str) -> str:
         vnum += 1
 
 
-def build_experiment_dir(base_path: str, algo: str, loss_name: str, ph_value, history_len: int, context: str) -> str:
-    date_str = RUN_TS.strftime("%Y%m%d")
-    exp_folder_name = f"EXP-{date_str}-prediction-{safe_token(loss_name)}-{safe_token(algo)}-H{history_len}-PH{safe_token(ph_value)}-{safe_token(context)}"
+def build_experiment_dir(base_path: str, dataset_name: str, algorithm_name: str, loss_name: str, context: str = "") -> str:
+    date_str = RUN_TS.strftime("%Y%m%d%H%M")
+    exp_folder_name = f"{date_str}-pred-{safe_token(dataset_name)}-{safe_token(algorithm_name)}-{safe_token(loss_name)}{safe_token(context)}"
 
     # Combine the base path with the experiment folder name
     base = os.path.join(base_path, exp_folder_name)
 
-    exp_dir = next_versioned_dir(base)
+    # exp_dir = next_versioned_dir(base)
+    exp_dir = base  # Use the base name directly without versioning
     for sub in ["models", "plots/training", "results/predictions", "results/evaluation/metrics",
                 "results/evaluation/figures", "summaries", "readmes"]:
         os.makedirs(os.path.join(exp_dir, sub), exist_ok=True)
@@ -353,7 +356,7 @@ def write_fold_json_and_md(exp_dir, loss_name, algo, ph, fold_idx, fold_started_
 
 
 # ----------------------- Main README writer -----------------------
-def write_experiment_readme(exp_dir, loss_name, algo, ph, history_len, context, k_folds):
+def write_experiment_readme(exp_dir, loss_name, algo, ph, history_len, k_folds):
     exp_name, git_info = os.path.basename(exp_dir), get_git_info()
     lines = [f"# Experiment Summary: `{exp_name}`\n",
              f"- **Run ID**: `{GLOBAL_RUN_ID}`", f"- **Date**: `{RUN_TS.strftime('%Y-%m-%d %H:%M:%S')}`",
@@ -364,7 +367,7 @@ def write_experiment_readme(exp_dir, loss_name, algo, ph, history_len, context, 
              "## 📊 Quick Links\n",
              "- [TensorBoard Logs](./models/)",
              f"- [Aggregated Predictions](./results/predictions/df_test_results_vectors_{loss_name}_{algo}_H{ph}.parquet)",
-             f"- [Aggregated Metrics](./results/evaluation/metrics/metrics_performance_by_range_{loss_name}_{algo}_H{ph}_ALL.csv)",
+             f"- [Aggregated Metrics](./results/evaluation/metrics/metrics_performance_{loss_name}_{algo}_H{ph}_ALL.csv)",
              "- [Clarke Error Grid (CEG) Plots](./results/evaluation/figures/)",
              "- [Detailed Log File](./experiment_log.out)\n",
              "---", f"\n## 📂 Fold Details ({k_folds} folds)\n"]
@@ -396,9 +399,11 @@ try:
                 k_folds = 5 if do_cross_validation else 1
 
                 for current_algorithm in algorithms:
-                    EXP_DIR = build_experiment_dir(experiment_base_path, current_algorithm, loss_function_name,
-                                                   current_horizon, current_history,
-                                                   experiment_context)
+                    dataset_file_name = f"{dataset_name}_H{current_history}_PH{current_horizon}_kfold{k_folds}"
+                    dataset_file_name_nofold = f"{dataset_name}_H{current_history}_PH{current_horizon}"
+                    EXP_DIR = build_experiment_dir(base_path=experiment_base_path,
+                                                   dataset_name=dataset_file_name_nofold,
+                                                   algorithm_name=current_algorithm, loss_name=loss_function_name)
                     exp_log_file = None
                     try:
                         exp_log_file_path = os.path.join(EXP_DIR, "experiment_log.out")
@@ -425,8 +430,8 @@ try:
 
                         for i in range(k_folds):
                             current_fold = i + 1
-                            current_name = f"{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_Fold{current_fold}"
-                            data_file_path = f"{windows_path}windows_with_{k_folds}folds_{dataset_name}_H{current_history}_PH{current_horizon}.parquet"
+                            current_name = f"{current_algorithm}_{loss_function_name}_H{current_history}_PH{current_horizon}_Fold{current_fold}"
+                            data_file_path = f"{windows_path}{dataset_file_name}.parquet"
 
                             print(f"\n---- Loading data for Fold {current_fold}/{k_folds} from: {data_file_path} ----")
                             df = pd.read_parquet(data_file_path)
@@ -509,7 +514,7 @@ try:
                             # Concat arrays and tracking indices to generate test vectors
                             df_res = pd.DataFrame({'y_test': y_test.ravel(), 'y_predict': y_pred.ravel()})
                             df_res = pd.concat([df_res, df_test_info], axis=1)
-                            preds_path = os.path.join(PRED_DIR, f'df_test_results_vectors_{current_name}.parquet')
+                            preds_path = os.path.join(PRED_DIR, f'test_results_vectors_{current_name}.parquet')
                             df_res.to_parquet(preds_path)
                             aggregated_results.append(df_res)
 
@@ -579,7 +584,7 @@ try:
                                 maximum_sensor_reading=maximum_sensor_reading
                             )
                             df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                                f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_Fold{fold_number}.csv'),
+                                                                                f'metrics_performance_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_Fold{fold_number}.csv'),
                                                                    index=False)
                             df_metrics_performance['Fold'] = fold_number
 
@@ -606,16 +611,16 @@ try:
 
                         df_metrics_performance_agg = pd.concat(aggregated_results_performance, ignore_index=True)
                         df_metrics_performance_agg.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                                f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_metric_then_aggregate.csv'),
+                                                                                f'metrics_performance_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_metric_then_aggregate.csv'),
                                                                    index=False)
                         df_metrics_performance_agg = df_metrics_performance_agg.drop(columns=['Fold'])
                         df_metrics_performance_agg_flat, df_metrics_performance_agg_report = fold_results_aggregation(
                             df_metrics_performance_agg)
                         df_metrics_performance_agg_flat.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                                     f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_flat.csv'),
+                                                                                     f'metrics_performance_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_flat.csv'),
                                                                         index=False)
                         df_metrics_performance_agg_report.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                                       f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_report.csv'),
+                                                                                       f'metrics_performance_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_metric_then_aggregate_report.csv'),
                                                                           index=False)
 
                         df_number_of_points_agg = pd.concat(aggregated_results_number_of_points, ignore_index=True)
@@ -664,7 +669,7 @@ try:
                                                                                                       minimum_sensor_reading=minimum_sensor_reading,
                                                                                                       maximum_sensor_reading=maximum_sensor_reading)
                         df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                            f'metrics_performance_by_range_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_agregate_then_metric.csv'),
+                                                                            f'metrics_performance_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_agregate_then_metric.csv'),
                                                                index=False)
                         df_number_of_points.to_csv(os.path.join(METRICS_DIR,
                                                                 f'number_of_points_by_zones_{loss_function_name}_{current_algorithm}_H{current_history}_PH{current_horizon}_ALL_agregate_then_metric.csv'),
@@ -675,7 +680,7 @@ try:
                         print('Metrics for all folds calculated and saved.')
 
                         write_experiment_readme(EXP_DIR, loss_function_name, current_algorithm, current_horizon,
-                                                current_history, experiment_context, k_folds)
+                                                current_history, k_folds)
                         print(f"Main README.md created at: {os.path.join(EXP_DIR, 'README.md')}")
 
                         print(f"================\nFinished Experiment: {os.path.basename(EXP_DIR)}\n================\n\n")

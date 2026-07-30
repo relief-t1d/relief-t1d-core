@@ -1,3 +1,5 @@
 ﻿.idea
 *.parquet
 *__pycache__
+*.env
+*.yaml

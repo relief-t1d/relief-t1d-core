@@ -1,47 +1,46 @@
 # -*- coding: utf-8 -*-
 """
-Execution script to generate temporal windows and cross-validation folds.
-This script strictly follows the data preparation steps from generate_windows.py,
-using an external YAML configuration file for reproducibility.
+RELIEF-T1D: Temporal Windows and Folds Generation Pipeline
+
+This script reads raw blood glucose datasets, generates sliding temporal windows
+based on specified history lengths and prediction horizons, and splits patients
+into balanced k-fold cross-validation sets.
+
+All configuration parameters and input/output paths are governed by an external
+YAML configuration file supporting environment variable expansion (e.g., ${PATH_TO_LOAD}).
 """
 
-# ---------------------------------------------------------
-# SYSTEM PATH CONFIGURATION (Essential for Remote Server)
-# ---------------------------------------------------------
 import os
 import sys
-
-# Get the absolute path of the directory containing this script (scripts/)
-current_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Get the parent directory and append it to sys.path
-project_root = os.path.abspath(os.path.join(current_dir, ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-# ---------------------------------------------------------
-# IMPORTS STANDARD, THIRD-PARTY, AND INTERNAL MODULAR LIBRARY
-# ---------------------------------------------------------
 import argparse
 from datetime import datetime
 from pathlib import Path
 import yaml
 import pandas as pd
+from dotenv import load_dotenv
 
-# Import our custom modules from the 'src' directory
+# Load environment variables from a local .env file into os.environ if present
+load_dotenv()
+
+# ---------------------------------------------------------
+# 1. SYSTEM PATH CONFIGURATION
+# ---------------------------------------------------------
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+DEFAULT_CONFIG = PROJECT_ROOT / "config" / "generate_prediction_windows.yaml"
+
+# ---------------------------------------------------------
+# 2. IMPORTS FROM INTERNAL MODULAR LIBRARY (src/)
+# ---------------------------------------------------------
 from src.preprocessing.make_windows import get_windows_one_step_walk_forward
 from src.preprocessing.make_folds import (
     make_folds_greedy_splits_valanced_priority,
     validate_folds,
     tag_folds_and_save
 )
-
-# Get the absolute path to the folder where this script is located ('scripts')
-SCRIPT_DIR = Path(__file__).resolve().parent
-# Get the absolute path to the project root (one level up from 'scripts')
-PROJECT_ROOT = SCRIPT_DIR.parent
-# Build the path to 'configs/preprocessing_prediction_data.yaml' at the root
-DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "generate_prediction_windows.yaml"
 
 
 class Tee(object):
@@ -60,7 +59,7 @@ class Tee(object):
 
 
 def parse_arguments():
-    """Configure and read the CLI arguments."""
+    """Configure and parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Pipeline to generate temporal windows using a YAML config.")
     parser.add_argument(
         '--config',
@@ -75,9 +74,11 @@ def parse_arguments():
 # MAIN PIPELINE
 # ==========================================
 def main(config_path):
-    # --- Read configuration from YAML file ---
+    # --- Load YAML configuration and expand environment variables (e.g., ${PATH_TO_LOAD}) ---
     with open(config_path, 'r', encoding='utf-8') as file:
-        config = yaml.safe_load(file)
+        raw_yaml_content = file.read()
+        expanded_yaml_content = os.path.expandvars(raw_yaml_content)
+        config = yaml.safe_load(expanded_yaml_content)
 
     # --- Extract variables ---
     dataset_name = config['dataset']['name']
@@ -149,20 +150,20 @@ def main(config_path):
         print(f"Number of patients with valid data: {len(patient_dict)}")
 
         # 2.2 Iterate over each history length
-        for current_history in history_lengths:
+        for current_historic in history_lengths:
             print("\n====================================================================")
-            print(f" 🕒 RUNNING HISTORY LENGTH (H): {current_history} steps ({current_history * 15} mins)")
+            print(f" 🕒 RUNNING HISTORY LENGTH (H): {current_historic} steps ({current_historic * 15} mins)")
             print("====================================================================")
 
             for current_horizon in horizons:
-                print(f"\n  -> Processing Combination: H={current_history} | PH={current_horizon}")
+                print(f"\n  -> Processing Combination: H={current_historic} | PH={current_horizon}")
                 print("  --------------------------------------------------")
 
                 # --- Step A: Generate Pure Windows ---
                 print("  Generating sliding windows...")
                 df_pure_windows = get_windows_one_step_walk_forward(
                     bgl_measurement_dict=patient_dict,
-                    history_length=current_history,
+                    history_length=current_historic,
                     horizon=current_horizon,
                     deduplicate_intra_patient=deduplicate_intra_patient,
                     date_dict=date_dict,
@@ -171,7 +172,7 @@ def main(config_path):
                 print(f"  Total windows generated: {len(df_pure_windows)}")
 
                 # --- Step B: Save Pure Windows ---
-                pure_filename = f"windows_H{current_history}_PH{current_horizon}_{dataset_name}.parquet"
+                pure_filename = f'{dataset_name}_H{current_historic}_PH{current_horizon}_windows.parquet'
                 pure_filepath = os.path.join(path_pure_windows, pure_filename)
                 df_pure_windows.to_parquet(pure_filepath, index=False)
                 print(f"  ✓ Pure windows saved to: {pure_filename}")
@@ -187,6 +188,29 @@ def main(config_path):
                     seed=random_seed
                 )
 
+                # --- Step D.1: Print Fold Statistics ---
+                print(f"\n  ------- Statistics of folds created for H={current_historic} | PH={current_horizon} -------")
+                num_patients = len(patient_window_counts)
+                total_windows_all = sum(patient_window_counts.values())
+
+                for i, fold in enumerate(folds_split):
+                    train_wins = sum(patient_window_counts[pid] for pid in fold['train'])
+                    val_wins = sum(patient_window_counts[pid] for pid in fold['val'])
+                    test_wins = sum(patient_window_counts[pid] for pid in fold['test'])
+
+                    print(f"\n  ---- Fold {i + 1}: -----")
+                    print("  -- Totals --")
+                    print(f"    Train: {len(fold['train'])} patients. Total windows: {train_wins}")
+                    print(f"    Val:   {len(fold['val'])} patients. Total windows: {val_wins}")
+                    print(f"    Test:  {len(fold['test'])} patients. Total windows: {test_wins}")
+
+                    print("\n  -- Percentages --")
+                    print(f"    Train: {(len(fold['train']) / num_patients * 100):.2f}% patients. Windows: {(train_wins / total_windows_all * 100):.2f}%")
+                    print(f"    Val:   {(len(fold['val']) / num_patients * 100):.2f}% patients. Windows: {(val_wins / total_windows_all * 100):.2f}%")
+                    print(f"    Test:  {(len(fold['test']) / num_patients * 100):.2f}% patients. Windows: {(test_wins / total_windows_all * 100):.2f}%")
+
+                print(f"\n  End of statistics for folds created for H={current_historic} | PH={current_horizon}")
+
                 # --- Step E: Validate Folds ---
                 validate_folds(
                     folds=folds_split,
@@ -197,10 +221,12 @@ def main(config_path):
                 # --- Step F: Tag and Save ---
                 tag_folds_and_save(
                     df_windows=df_pure_windows,
-                    folds=folds_split,
+                    folds_splits=folds_split,
                     output_path=path_folds,
-                    filename=f"windows_with_{k_folds}folds_{dataset_name}_H{current_history}",
-                    horizon=current_horizon
+                    dataset_name=dataset_name,
+                    historic=current_historic,
+                    horizon=current_horizon,
+                    k_folds=k_folds
                 )
 
         print("\n--- All combinations generated and pipeline finished successfully! ---")
