@@ -48,11 +48,12 @@ def build_cnn_model(history_length: int, nb_output_units: int = 1) -> Model:
     Useful for extracting local shape features (trends, peaks) from the glucose curve.
     """
     i = Input(shape=(history_length, 1))
-    x = Conv1D(filters=16, kernel_size=2, activation='relu')(i)
-    x = MaxPooling1D(pool_size=2)(x)
 
-    x = Conv1D(filters=32, kernel_size=2, activation='relu')(x)
-    x = MaxPooling1D(pool_size=2)(x)
+    x = Conv1D(filters=16, kernel_size=2, activation='relu', padding='same')(i)
+    x = MaxPooling1D(pool_size=2, padding='same')(x)
+
+    x = Conv1D(filters=32, kernel_size=2, activation='relu', padding='same')(x)
+    x = MaxPooling1D(pool_size=2, padding='same')(x)
 
     x = Flatten()(x)
     x = Dense(units=50, activation='relu')(x)
