@@ -1,0 +1,36 @@
+# ==========================================
+# Training Configuration File
+# ==========================================
+
+experiment:
+  random_seed: 42
+  do_cross_validation: true
+  k_folds: 5
+  algorithms: ["Linear", "LSTM"] # Options: ["Linear", "LSTM", "CNN"]
+  loss_functions: ["RMSE", "cSigP01", "cSigP06"] # Options: ["RMSE", "cSigP01", "cSigP06", "gMSE", "gMAD", "cSigMSEP01", "cSigMSEP06"]
+  history_lengths: [8, 12, 16] # Options: [2, 4, 8, 12, 16, 20, ...]
+  horizons: [6, 7, 8, 9] # Options: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]
+
+training_hyperparameters:
+  batch_size: 4096
+  patience: 10
+  max_epoch: 500
+  dropout: 0.1
+  recurrent_dropout: 0.0
+
+sensor_limits:
+  minimum_reading: 39 # Minimum valid BGL measurement of the CGM data
+  maximum_reading: 401 # Maximum valid BGL measurement of the CGM data
+
+paths:
+  windows_path: "${PATH_TO_LOAD_WINDOWS}"
+  experiment_base_path: "../../relief-t1d-experiments/experiments/"
+  central_models_path: "../../relief-t1d-models/models"
+
+metadata:
+  dataset_name: "dataset_name"
+  training_data: "70% dataset_name"
+  validation_data: "10% dataset_name"
+  testing_data: "20% dataset_name"
+  wise_level: "patient"
+  link: "link/to/ids"

@@ -1,0 +1,21 @@
+# ==========================================
+# Global Configuration File
+# ==========================================
+
+dataset:
+  name: "dataset_name"
+  glucose_column: "15min"
+  id_column: "patient_id"
+
+hyperparameters:
+  history_lengths: [2, 8, 16] # Options: [2, 4, 8, 12, 16, 20, ...]
+  horizons: [3, 8, 9, 10] # Options: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]
+
+folds:
+  k_folds: 5
+  random_seed: 42
+  disable_deduplication: false
+
+paths:
+  path_to_load: "${PATH_TO_DATA}"
+  base_output_dir: "../../relief-t1d-datasets/"
