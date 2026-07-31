@@ -23,7 +23,7 @@ sensor_limits:
   maximum_reading: 401 # Maximum valid BGL measurement of the CGM data
 
 paths:
-  windows_path: "${PATH_TO_LOAD_WINDOWS}"
+  windows_path: "${PATH_TO_DATA_WINDOWS}"
   experiment_base_path: "../../relief-t1d-experiments/experiments/"
   central_models_path: "../../relief-t1d-models/models"
 
