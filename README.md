@@ -1,6 +1,6 @@
 # <img src="https://projects.ugr.es/relief-t1d/assets/img/project/Logo.png" width="85" alt="RELIEF-T1D Logo" align="center" /> &nbsp;&nbsp; RELIEF-T1D Core
 
-**RELIEF-T1D: Reliable nocturnal glucose event prediction for T1D**
+**RELIEF-T1D: towards Clinically Reliable AI Prediction of Adverse Glycemic Events for Improved Quality of Life in Type 1 Diabetes**
 
 [![Website](https://img.shields.io/badge/Website-projects.ugr.es%2Frelief--t1d-005691?style=flat-square&logo=googlechrome&logoColor=white)](https://projects.ugr.es/relief-t1d/index.html)
 
