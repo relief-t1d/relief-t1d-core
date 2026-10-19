@@ -3,8 +3,8 @@
 RELIEF-T1D: Temporal Windows and Folds Generation Pipeline
 
 This script reads raw blood glucose datasets, generates sliding temporal windows
-based on specified history lengths and prediction horizons, and splits patients
-into balanced k-fold cross-validation sets.
+based on specified history multipliers or history lengths and prediction horizons,
+and splits patients into balanced k-fold cross-validation sets.
 
 All configuration parameters and input/output paths are governed by an external
 YAML configuration file supporting environment variable expansion (e.g., ${PATH_TO_LOAD}).
@@ -70,11 +70,40 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def get_experiment_pairs(hyperparams_config):
+    """
+    Extract (history_length, horizon) pairs. Supports both proportional history
+    multipliers (e.g., [0.25, 0.5, 1.0]) and explicit history length lists.
+    """
+    pairs = []
+
+    # Proportional mode: dynamic multipliers relative to prediction horizon
+    if 'history_multipliers' in hyperparams_config:
+        multipliers = hyperparams_config['history_multipliers']
+        for ph in hyperparams_config['horizons']:
+            # Calculate H, enforce minimum of 1, round to integer, and deduplicate
+            calculated_h = sorted(list(set(
+                max(1, int(round(ph * m))) for m in multipliers
+            )))
+            for h in calculated_h:
+                pairs.append((h, ph))
+
+    # Traditional mode: static history length list
+    elif 'history_lengths' in hyperparams_config:
+        for h in hyperparams_config['history_lengths']:
+            for ph in hyperparams_config['horizons']:
+                pairs.append((h, ph))
+    else:
+        raise KeyError("Hyperparameters section must contain either 'history_multipliers' or 'history_lengths'.")
+
+    return pairs
+
+
 # ==========================================
 # MAIN PIPELINE
 # ==========================================
 def main(config_path):
-    # --- Load YAML configuration and expand environment variables (e.g., ${PATH_TO_LOAD}) ---
+    # --- Load YAML configuration and expand environment variables ---
     with open(config_path, 'r', encoding='utf-8') as file:
         raw_yaml_content = file.read()
         expanded_yaml_content = os.path.expandvars(raw_yaml_content)
@@ -85,8 +114,8 @@ def main(config_path):
     glucose_column_name = config['dataset']['glucose_column']
     id_column_name = config['dataset']['id_column']
 
-    history_lengths = config['hyperparameters']['history_lengths']
-    horizons = config['hyperparameters']['horizons']
+    # Dynamically derive (history_length, horizon) experiment pairs
+    experiment_pairs = get_experiment_pairs(config['hyperparameters'])
 
     k_folds = config['folds']['k_folds']
     random_seed = config['folds']['random_seed']
@@ -149,85 +178,97 @@ def main(config_path):
 
         print(f"Number of patients with valid data: {len(patient_dict)}")
 
-        # 2.2 Iterate over each history length
-        for current_historic in history_lengths:
+        # 2.2 Iterate over dynamic experiment pairs (H, PH)
+        for current_historic, current_horizon in experiment_pairs:
             print("\n====================================================================")
-            print(f" 🕒 RUNNING HISTORY LENGTH (H): {current_historic} steps ({current_historic * 15} mins)")
+            print(f" 🕒 RUNNING COMBINATION: H={current_historic} steps ({current_historic * 15} mins) | PH={current_horizon}")
             print("====================================================================")
+            print(f"  -> Processing Combination: H={current_historic} | PH={current_horizon}")
+            print("  --------------------------------------------------")
 
-            for current_horizon in horizons:
-                print(f"\n  -> Processing Combination: H={current_historic} | PH={current_horizon}")
-                print("  --------------------------------------------------")
+            # --- Step A: Generate Pure Windows ---
+            print("  Generating sliding windows...")
+            df_pure_windows = get_windows_one_step_walk_forward(
+                bgl_measurement_dict=patient_dict,
+                history_length=current_historic,
+                horizon=current_horizon,
+                deduplicate_intra_patient=deduplicate_intra_patient,
+                date_dict=date_dict,
+                time_dict=time_dict
+            )
+            print(f"  Total windows generated: {len(df_pure_windows)}")
 
-                # --- Step A: Generate Pure Windows ---
-                print("  Generating sliding windows...")
-                df_pure_windows = get_windows_one_step_walk_forward(
-                    bgl_measurement_dict=patient_dict,
-                    history_length=current_historic,
-                    horizon=current_horizon,
-                    deduplicate_intra_patient=deduplicate_intra_patient,
-                    date_dict=date_dict,
-                    time_dict=time_dict
-                )
-                print(f"  Total windows generated: {len(df_pure_windows)}")
+            # --- Step B: Save Pure Windows ---
+            pure_filename = f'{dataset_name}_H{current_historic}_PH{current_horizon}_windows.parquet'
+            pure_filepath = os.path.join(path_pure_windows, pure_filename)
+            df_pure_windows.to_parquet(pure_filepath, index=False)
+            print(f"  ✓ Pure windows saved to: {pure_filename}")
 
-                # --- Step B: Save Pure Windows ---
-                pure_filename = f'{dataset_name}_H{current_historic}_PH{current_horizon}_windows.parquet'
-                pure_filepath = os.path.join(path_pure_windows, pure_filename)
-                df_pure_windows.to_parquet(pure_filepath, index=False)
-                print(f"  ✓ Pure windows saved to: {pure_filename}")
+            # --- Step C: Calculate patient loads ---
+            patient_window_counts = df_pure_windows[id_column_name].value_counts().to_dict()
 
-                # --- Step C: Calculate patient loads ---
-                patient_window_counts = df_pure_windows[id_column_name].value_counts().to_dict()
+            # --- Step D: Create Folds ---
+            print(f"  Creating {k_folds}-fold patient-wise splits and Production Split...")
+            folds_split, production_split = make_folds_greedy_splits_valanced_priority(
+                                            patient_windows=patient_window_counts,
+                                            k=k_folds,
+                                            seed=random_seed
+                                            )
 
-                # --- Step D: Create Folds ---
-                print(f"  Creating {k_folds}-fold patient-wise splits...")
-                folds_split = make_folds_greedy_splits_valanced_priority(
-                    patient_windows=patient_window_counts,
-                    k=k_folds,
-                    seed=random_seed
-                )
+            # --- Step D.1: Print Fold Statistics ---
+            print(f"\n  ------- Statistics of folds created for H={current_historic} | PH={current_horizon} -------")
+            num_patients = len(patient_window_counts)
+            total_windows_all = sum(patient_window_counts.values())
 
-                # --- Step D.1: Print Fold Statistics ---
-                print(f"\n  ------- Statistics of folds created for H={current_historic} | PH={current_horizon} -------")
-                num_patients = len(patient_window_counts)
-                total_windows_all = sum(patient_window_counts.values())
+            for i, fold in enumerate(folds_split):
+                train_wins = sum(patient_window_counts[pid] for pid in fold['train'])
+                val_wins = sum(patient_window_counts[pid] for pid in fold['val'])
+                test_wins = sum(patient_window_counts[pid] for pid in fold['test'])
 
-                for i, fold in enumerate(folds_split):
-                    train_wins = sum(patient_window_counts[pid] for pid in fold['train'])
-                    val_wins = sum(patient_window_counts[pid] for pid in fold['val'])
-                    test_wins = sum(patient_window_counts[pid] for pid in fold['test'])
+                print(f"\n  ---- Fold {i + 1}: -----")
+                print("  -- Totals --")
+                print(f"    Train: {len(fold['train'])} patients. Total windows: {train_wins}")
+                print(f"    Val:   {len(fold['val'])} patients. Total windows: {val_wins}")
+                print(f"    Test:  {len(fold['test'])} patients. Total windows: {test_wins}")
 
-                    print(f"\n  ---- Fold {i + 1}: -----")
-                    print("  -- Totals --")
-                    print(f"    Train: {len(fold['train'])} patients. Total windows: {train_wins}")
-                    print(f"    Val:   {len(fold['val'])} patients. Total windows: {val_wins}")
-                    print(f"    Test:  {len(fold['test'])} patients. Total windows: {test_wins}")
+                print("\n  -- Percentages --")
+                print(f"    Train: {(len(fold['train']) / num_patients * 100):.2f}% patients. Windows: {(train_wins / total_windows_all * 100):.2f}%")
+                print(f"    Val:   {(len(fold['val']) / num_patients * 100):.2f}% patients. Windows: {(val_wins / total_windows_all * 100):.2f}%")
+                print(f"    Test:  {(len(fold['test']) / num_patients * 100):.2f}% patients. Windows: {(test_wins / total_windows_all * 100):.2f}%")
 
-                    print("\n  -- Percentages --")
-                    print(f"    Train: {(len(fold['train']) / num_patients * 100):.2f}% patients. Windows: {(train_wins / total_windows_all * 100):.2f}%")
-                    print(f"    Val:   {(len(fold['val']) / num_patients * 100):.2f}% patients. Windows: {(val_wins / total_windows_all * 100):.2f}%")
-                    print(f"    Test:  {(len(fold['test']) / num_patients * 100):.2f}% patients. Windows: {(test_wins / total_windows_all * 100):.2f}%")
+                # --- Statistics for Production Split ---
+                prod_train_wins = sum(patient_window_counts[pid] for pid in production_split['train'])
+                prod_val_wins = sum(patient_window_counts[pid] for pid in production_split['val'])
 
-                print(f"\n  End of statistics for folds created for H={current_historic} | PH={current_horizon}")
+                print(f"\n  ---- Production Split (Deployment Model): -----")
+                print("  -- Totals --")
+                print(f"    Train: {len(production_split['train'])} patients. Total windows: {prod_train_wins}")
+                print(f"    Val:   {len(production_split['val'])} patients. Total windows: {prod_val_wins}")
 
-                # --- Step E: Validate Folds ---
-                validate_folds(
-                    folds=folds_split,
-                    patient_measurements=patient_window_counts,
-                    horizon=current_horizon
-                )
+                print("\n  -- Percentages --")
+                print(f"    Train: {(len(production_split['train']) / num_patients * 100):.2f}% patients. Windows: {(prod_train_wins / total_windows_all * 100):.2f}%")
+                print(f"    Val:   {(len(production_split['val']) / num_patients * 100):.2f}% patients. Windows: {(prod_val_wins / total_windows_all * 100):.2f}%")
 
-                # --- Step F: Tag and Save ---
-                tag_folds_and_save(
-                    df_windows=df_pure_windows,
-                    folds_splits=folds_split,
-                    output_path=path_folds,
-                    dataset_name=dataset_name,
-                    historic=current_historic,
-                    horizon=current_horizon,
-                    k_folds=k_folds
-                )
+            print(f"\n  End of statistics for folds created for H={current_historic} | PH={current_horizon}")
+
+            # --- Step E: Validate Folds ---
+            validate_folds(
+                folds=folds_split,
+                patient_measurements=patient_window_counts,
+                horizon=current_horizon
+            )
+
+            # --- Step F: Tag and Save ---
+            tag_folds_and_save(
+                df_windows=df_pure_windows,
+                folds_splits=folds_split,
+                production_fold=production_split,
+                output_path=path_folds,
+                dataset_name=dataset_name,
+                historic=current_historic,
+                horizon=current_horizon,
+                k_folds=k_folds
+            )
 
         print("\n--- All combinations generated and pipeline finished successfully! ---")
 
