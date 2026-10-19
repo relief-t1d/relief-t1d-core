@@ -2,7 +2,7 @@ import pandas as pd
 import os
 import random
 from collections import Counter
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 # Type alias for clarity: each fold is a dict with three lists of patient IDs (str)
 Fold = Dict[str, List[str]]  # {'train': [...], 'val': [...], 'test': [...]}
@@ -10,8 +10,9 @@ Fold = Dict[str, List[str]]  # {'train': [...], 'val': [...], 'test': [...]}
 def make_folds_greedy_splits_valanced_priority(patient_windows: Dict[str, int],
                                                k: int = 5,
                                                seed: int = 42,
-                                               ) -> List[Fold]:
-    """Balanced *k*-fold split (patient‑wise).
+                                               val_ratio_prod: float = 0.10
+                                               ) -> Tuple[List[Fold], Fold]:
+    """Balanced *k*-fold split (patient‑wise) AND a dedicated production split.
 
     • **Test assignment (unchanged)** – patients are sorted globally by window
       count ↓, then taken in *k*-sized blocks; one patient from each block is
@@ -19,11 +20,15 @@ def make_folds_greedy_splits_valanced_priority(patient_windows: Dict[str, int],
       evenly.  Remaining (< *k*) patients go to the fold with the lightest
       load.
 
-    • **Train / Val assignment (NEW)** – the remaining patients of each fold
+    • **Train / Val assignment** – the remaining patients of each fold
       are also processed in blocks of *k* **(8 → 7‑train / 1‑val)**.  The last
       block, even if smaller than *k*, still sends **one random patient to
       validation** and the rest to training.  This guarantees *at least one*
       validation patient per fold.
+      
+    • **Production Split** – A standalone split is generated using the
+      same sorted blocks to ensure data leakage prevention. 'val_ratio_prod'
+      determines the validation size. 'test' is left empty.
     """
 
     rng = random.Random(seed)
@@ -61,7 +66,6 @@ def make_folds_greedy_splits_valanced_priority(patient_windows: Dict[str, int],
     # ------------------------------------------------------------------
     # 3️⃣  Build train / val with 7‑train / 1‑val blocks (size == 8)
     # ------------------------------------------------------------------
-    all_ids_set = set(patient_windows.keys())
     folds: List[Fold] = []
     train_block = 7  # patients for train per block of 8
     val_block = 1  # patients for val  per block of 8
@@ -97,7 +101,45 @@ def make_folds_greedy_splits_valanced_priority(patient_windows: Dict[str, int],
             'test': sorted(test_folds[fold_idx])
         })
 
-    return folds
+    # ------------------------------------------------------------------
+    # 4️⃣  Build standalone Production Split
+    # ------------------------------------------------------------------
+    prod_train_ids, prod_val_ids = [], []
+    
+    # Calculate block size based on requested ratio to ensure proportional splits.
+    # For example: if val_ratio_prod = 0.10 (10%), block_size_prod = 10.
+    # If val_ratio_prod = 0.15 (15%), block_size_prod = 6.
+    block_size_prod = max(2, int(1 / val_ratio_prod))
+    
+    idx_prod = 0
+    while idx_prod < len(sorted_patients):
+        # Slice the next block of patients (these are already globally sorted 
+        # by window count, ensuring balanced data volume across blocks).
+        block = sorted_patients[idx_prod: idx_prod + block_size_prod]
+        
+        # Shuffle the block so the validation patient is chosen randomly,
+        # avoiding bias towards the patient with the highest/lowest count in the block.
+        rng.shuffle(block)
+        
+        # Assign exactly 1 patient per block to the validation set
+        prod_val_ids.append(block[0])
+        
+        # Assign the remaining patients in the current block to the training set
+        prod_train_ids.extend(block[1:])
+        
+        # Move the pointer forward to the next block
+        idx_prod += block_size_prod
+
+    production_fold: Fold = {
+        'train': sorted(prod_train_ids),
+        'val': sorted(prod_val_ids),
+        # An empty 'test' list is included to strictly maintain compatibility
+        # with the expected 'Fold' type definition (Dict with train, val, and test keys).
+        # The production model does not need a local test set.
+        'test': []  
+    }
+
+    return folds, production_fold
 
 def validate_folds(folds: List[Fold], patient_measurements: Dict[str, int], tolerance_pct: float = 10.0,
                    horizon: int = 2) -> None:
@@ -157,6 +199,7 @@ def validate_folds(folds: List[Fold], patient_measurements: Dict[str, int], tole
 def tag_folds_and_save(
         df_windows: pd.DataFrame,
         folds_splits: List[Fold],
+        production_fold: Fold,
         output_path: str,
         dataset_name: str,
         historic: str,
@@ -165,11 +208,13 @@ def tag_folds_and_save(
         column_prefix: str = "fold") -> None:
     """
     Add one column per fold (fold0 … fold{k-1}) indicating whether each window
-    belongs to 'train', 'val' or 'test' in that fold, then write a single
-    Parquet file.
+    belongs to 'train', 'val' or 'test' in that fold.
+    Also adds a 'production_split' column for final deployment model training.
+    Then write a single Parquet file.
     """
     df_tagged = df_windows.copy()
 
+    # 1. Map standard K-Folds
     for idx, fold in enumerate(folds_splits):
         # Build a mapping patient_id -> split label for this fold
         label_map = {pid: "train" for pid in fold["train"]}
@@ -179,11 +224,16 @@ def tag_folds_and_save(
         col_name = f"{column_prefix}{idx}"
         df_tagged[col_name] = df_tagged["patient_id"].map(label_map).astype("category")
 
+    # 2. Map Production Split
+    prod_map = {pid: "train" for pid in production_fold["train"]}
+    prod_map.update({pid: "val" for pid in production_fold["val"]})
+    df_tagged['production_split'] = df_tagged["patient_id"].map(prod_map).astype("category")
+
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
     df_tagged.to_parquet(f'{output_path}{dataset_name}_H{historic}_PH{horizon}_kfold{k_folds}.parquet', index=False)
     print(f"\n ✓ File {dataset_name}_horizon_{horizon} written: {output_path}"
-          f"({len(df_windows):,} rows, {len(folds_splits)} fold-columns)")
+          f"({len(df_windows):,} rows, {len(folds_splits)} fold-columns + production_split)")
 
     return df_tagged
