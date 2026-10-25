@@ -4,18 +4,25 @@
 
 dataset:
   name: "dataset_name"
-  glucose_column: "15min"
+  glucose_column: "15min" # Timestamp column of the source data (regular 15-minute grid)
   id_column: "patient_id"
 
 hyperparameters:
   history_lengths: [2, 8, 16] # Options: [2, 4, 8, 12, 16, 20, ...]
   horizons: [3, 8, 9, 10] # Options: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]
+  # Alternative to history_lengths (H proportional to PH):
+  # history_multipliers: [1, 2] # H = round(PH * multiplier)
 
 folds:
   k_folds: 5
   random_seed: 42
   disable_deduplication: false
 
+# Optional. Both default to true if this section is omitted.
+options:
+  save_pure_windows: true # Save windows without fold tags to <base_output_dir>/windows/
+  generate_folds: true # Save tagged k-fold + production split dataset to <base_output_dir>/folds/
+
 paths:
-  path_to_load: "${PATH_TO_DATA}"
+  path_to_load: "${PATH_TO_DATA}" # Source parquet file (already filtered upstream)
   base_output_dir: "../../relief-t1d-datasets/"

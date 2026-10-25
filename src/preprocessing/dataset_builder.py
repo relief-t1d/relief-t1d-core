@@ -12,12 +12,13 @@ import pandas as pd
 from src.preprocessing.make_windows import get_windows_one_step_walk_forward
 from src.preprocessing.make_folds import (
     make_folds_greedy_splits_valanced_priority,
+    validate_folds,
     tag_folds_and_save
 )
 
 
 def build_single_dataset(
-        raw_data_path: str,
+        source_data_path: str,
         dataset_name: str,
         glucose_column_name: str,
         id_column_name: str,
@@ -33,38 +34,50 @@ def build_single_dataset(
         random_seed: int = 42
 ) -> bool:
     """
-    Executes the data generation pipeline for a single (H, PH) combination.
-    Loads raw data, generates temporal sliding windows, and optionally saves pure windows
-    and/or generates and saves k-folds with a production split.
+    Executes the end-to-end data generation pipeline for a single Historic (H) and Prediction Horizon (PH) combination.
+
+    This function loads the source Parquet data (CGM series already filtered upstream), creates temporal sliding
+    windows, and optionally saves the pure windows. It also computes patient statistics, validates the splits, and
+    generates k-folds along with a standalone production split for final model deployment.
 
     Args:
-        raw_data_path (str): Path to the raw Parquet data file.
-        dataset_name (str): Base name of the dataset for the output file.
-        glucose_column_name (str): Name of the column containing the timestamps/dates.
-        id_column_name (str): Name of the column containing patient IDs.
-        historic (int): Number of historical steps used to predict (H).
-        ph (int): Prediction horizon steps (PH).
-        deduplicate_intra_patient (bool): Whether to remove intra-patient duplicates.
-        save_pure_windows (bool): Flag to save the generated pure windows.
-        output_pure_windows_dir (str): Directory to save the pure windows dataset.
-        generate_folds (bool): Flag to calculate, tag, and save the cross-validation folds.
-        output_folds_dir (str): Directory where the final folds dataset should be saved.
-        k_folds (int): Number of folds for cross-validation.
-        random_seed (int): Seed for reproducibility in fold creation.
+        source_data_path (str): Absolute or relative path to the source Parquet file containing the measurements.
+            This file is the input of the pipeline and has already been filtered upstream (it is not raw data).
+        dataset_name (str): Base name of the dataset used as a prefix for the output files (e.g., 'ohiot1dm').
+        glucose_column_name (str): Name of the DataFrame column containing the timestamps/dates of the measurements.
+        id_column_name (str): Name of the DataFrame column containing the unique patient identifiers.
+        historic (int): Number of historical steps used as input to predict the future (H).
+        ph (int): Prediction horizon in number of future steps to predict (PH).
+        deduplicate_intra_patient (bool, optional): If True, removes windows with identical input/output values
+            within the same patient. Defaults to True.
+        save_pure_windows (bool, optional): Flag to enable saving the generated pure windows (without fold tags)
+            to disk. Defaults to False.
+        output_pure_windows_dir (str, optional): Directory path to save the pure windows dataset.
+            Strictly required if `save_pure_windows` is True. Defaults to None.
+        generate_folds (bool, optional): Flag to calculate, tag, validate, and save the cross-validation folds
+            and the independent production split. Defaults to True.
+        output_folds_dir (str, optional): Directory path where the final tagged dataset should be saved.
+            Strictly required if `generate_folds` is True. Defaults to None.
+        k_folds (int, optional): Number of folds to create for the cross-validation splits. Defaults to 5.
+        random_seed (int, optional): Seed used for reproducibility during the greedy patient splitting process. Defaults to 42.
 
     Returns:
-        bool: True if the generation process completed successfully.
+        bool: True if the generation, validation, and saving processes completed successfully.
+
+    Raises:
+        FileNotFoundError: If the specified `source_data_path` does not exist.
+        ValueError: If no valid windows could be generated, or if output directories are missing when their respective flags are True.
     """
     print(f"\n[Dataset Builder] Starting generation for H={historic}, PH={ph}...")
 
     # ---------------------------------------------------------
-    # 1. Load and prepare raw data
+    # 1. Load and prepare source data
     # ---------------------------------------------------------
-    if not os.path.exists(raw_data_path):
-        raise FileNotFoundError(f"Raw data file not found at: {raw_data_path}")
+    if not os.path.exists(source_data_path):
+        raise FileNotFoundError(f"Source data file not found at: {source_data_path}")
 
-    print(f"  -> Loading raw data from: {raw_data_path}")
-    df_data = pd.read_parquet(raw_data_path)
+    print(f"  -> Loading source data from: {source_data_path}")
+    df_data = pd.read_parquet(source_data_path)
 
     # Filter valid rows (ensure the datetime/glucose column is not null)
     df_valid_rows = df_data[df_data[glucose_column_name].notna()]
@@ -89,6 +102,8 @@ def build_single_dataset(
         for pid, group in df_valid_rows.groupby(id_column_name)
     }
 
+    print(f"  -> Number of patients with valid data: {len(patient_dict)}")
+
     # ---------------------------------------------------------
     # 2. Generate Temporal Sliding Windows
     # ---------------------------------------------------------
@@ -105,6 +120,8 @@ def build_single_dataset(
     if df_pure_windows.empty:
         raise ValueError(f"No valid windows could be generated for H={historic}, PH={ph}.")
 
+    print(f"  -> Total windows generated: {len(df_pure_windows)}")
+
     # ---------------------------------------------------------
     # 3. Save Pure Windows (Optional)
     # ---------------------------------------------------------
@@ -113,13 +130,13 @@ def build_single_dataset(
             raise ValueError("output_pure_windows_dir must be provided if save_pure_windows is True.")
 
         os.makedirs(output_pure_windows_dir, exist_ok=True)
-        pure_filename = f'{dataset_name}_H{historic}_PH{ph}_pure_windows.parquet'
+        pure_filename = f'{dataset_name}_H{historic}_PH{ph}_windows.parquet'
         pure_filepath = os.path.join(output_pure_windows_dir, pure_filename)
         df_pure_windows.to_parquet(pure_filepath, index=False)
-        print(f"  -> Pure windows saved to: {pure_filepath}")
+        print(f"  ✓ Pure windows saved to: {pure_filename}")
 
     # ---------------------------------------------------------
-    # 4. Generate and Save Folds (Optional)
+    # 4. Generate, Validate and Save Folds (Optional)
     # ---------------------------------------------------------
     if generate_folds:
         if not output_folds_dir:
@@ -138,7 +155,55 @@ def build_single_dataset(
             seed=random_seed
         )
 
-        # Tag Folds and Save Final Dataset
+        # --- Statistics Logging ---
+        print(f"\n  ------- Statistics of folds created for H={historic} | PH={ph} -------")
+        num_patients = len(patient_window_counts)
+        total_windows_all = sum(patient_window_counts.values())
+
+        for i, fold in enumerate(folds_split):
+            train_wins = sum(patient_window_counts[pid] for pid in fold['train'])
+            val_wins = sum(patient_window_counts[pid] for pid in fold['val'])
+            test_wins = sum(patient_window_counts[pid] for pid in fold['test'])
+
+            print(f"\n  ---- Fold {i + 1}: -----")
+            print("  -- Totals --")
+            print(f"    Train: {len(fold['train'])} patients. Total windows: {train_wins}")
+            print(f"    Val:   {len(fold['val'])} patients. Total windows: {val_wins}")
+            print(f"    Test:  {len(fold['test'])} patients. Total windows: {test_wins}")
+
+            print("\n  -- Percentages --")
+            print(
+                f"    Train: {(len(fold['train']) / num_patients * 100):.2f}% patients. Windows: {(train_wins / total_windows_all * 100):.2f}%")
+            print(
+                f"    Val:   {(len(fold['val']) / num_patients * 100):.2f}% patients. Windows: {(val_wins / total_windows_all * 100):.2f}%")
+            print(
+                f"    Test:  {(len(fold['test']) / num_patients * 100):.2f}% patients. Windows: {(test_wins / total_windows_all * 100):.2f}%")
+
+        # --- Statistics for Production Split (printed once, outside the fold loop) ---
+        prod_train_wins = sum(patient_window_counts[pid] for pid in production_split['train'])
+        prod_val_wins = sum(patient_window_counts[pid] for pid in production_split['val'])
+
+        print(f"\n  ---- Production Split (Deployment Model): -----")
+        print("  -- Totals --")
+        print(f"    Train: {len(production_split['train'])} patients. Total windows: {prod_train_wins}")
+        print(f"    Val:   {len(production_split['val'])} patients. Total windows: {prod_val_wins}")
+
+        print("\n  -- Percentages --")
+        print(
+            f"    Train: {(len(production_split['train']) / num_patients * 100):.2f}% patients. Windows: {(prod_train_wins / total_windows_all * 100):.2f}%")
+        print(
+            f"    Val:   {(len(production_split['val']) / num_patients * 100):.2f}% patients. Windows: {(prod_val_wins / total_windows_all * 100):.2f}%")
+
+        print(f"\n  End of statistics for folds created for H={historic} | PH={ph}")
+
+        # --- Validate Folds ---
+        validate_folds(
+            folds=folds_split,
+            patient_measurements=patient_window_counts,
+            horizon=ph
+        )
+
+        # --- Tag Folds and Save Final Dataset ---
         print(f"  -> Tagging datasets and saving to Parquet...")
         tag_folds_and_save(
             df_windows=df_pure_windows,
@@ -146,11 +211,11 @@ def build_single_dataset(
             production_fold=production_split,
             output_path=output_folds_dir,
             dataset_name=dataset_name,
-            historic=historic,
+            historic=str(historic),
             horizon=ph,
             k_folds=k_folds
         )
-        print(f"  -> Folds dataset saved in: {output_folds_dir}")
+        print(f"  ✓ Folds dataset saved in: {output_folds_dir}")
 
     print(f"[Dataset Builder] Successfully finished process for H={historic}, PH={ph}.")
     return True
