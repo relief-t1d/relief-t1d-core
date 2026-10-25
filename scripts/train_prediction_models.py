@@ -7,11 +7,16 @@ prediction models. It handles the loading of preprocessed temporal windows,
 model instantiation (e.g., LSTMs, CNNs), k-fold cross-validation, and
 comprehensive evaluation using both statistical and clinical metrics.
 
+If the windows/folds file for a given (H, PH) pair does not exist, it is
+generated on-the-fly through the dataset_builder API using the 'dataset',
+'folds' and 'paths' sections of the configuration file.
+
 All experiment hyperparameters, sensor limits, and paths are governed by
 an external YAML configuration file for full reproducibility.
 """
 
 import os
+import re
 import sys
 import argparse
 import yaml
@@ -75,6 +80,14 @@ with open(cli_args.config, 'r', encoding='utf-8') as f:
     expanded_yaml_content = os.path.expandvars(raw_yaml_content)
     config = yaml.safe_load(expanded_yaml_content)
 
+# Fail fast if any environment variable could not be resolved (os.path.expandvars leaves them untouched)
+unresolved_env_vars = sorted(set(re.findall(r"\$\{[^}]+\}", expanded_yaml_content)))
+if unresolved_env_vars:
+    raise EnvironmentError(
+        f"Unresolved environment variables in '{cli_args.config}': {unresolved_env_vars}. "
+        "Check that they are defined in the .env file or in the system environment."
+    )
+
 # ---------------------------------------------------------
 # 2. GLOBAL REPRODUCIBILITY AND DETERMINISM (Before TensorFlow)
 # ---------------------------------------------------------
@@ -106,7 +119,6 @@ import datetime
 import platform
 import socket
 import json
-import re
 import psutil
 import subprocess
 import pandas as pd
@@ -118,6 +130,7 @@ import shutil
 from src.models.losses import *
 from src.models.architectures import get_compiled_model
 from src.evaluation.metrics import test_by_range, get_train_plots_loss, fold_results_aggregation
+from src.preprocessing.dataset_builder import build_single_dataset
 
 # ---------------------------------------------------------
 # 5. CONFIGURATION VARIABLES INJECTION
@@ -133,11 +146,29 @@ loss_functions_dic = {
     "cSigMSEP06": c_sig_p06_MSE,
 }
 
+# Extracting dataset configuration
+dataset_name = config['dataset']['name']
+glucose_column_name = config['dataset']['glucose_column']
+id_column_name = config['dataset']['id_column']
+
+# Extracting fold generation configuration
+k_folds = config['folds']['k_folds']
+folds_random_seed = config['folds']['random_seed']
+deduplicate_intra_patient = not config['folds']['disable_deduplication']
+
+if k_folds < 2:
+    raise ValueError(f"folds.k_folds must be >= 2 (got {k_folds}). "
+                     "To run without cross-validation set experiment.do_cross_validation to false.")
+
 # Extracting experiment configuration
 loss_function_name_list = config['experiment']['loss_functions']
 algorithms = config['experiment']['algorithms']
 do_cross_validation = config['experiment']['do_cross_validation']
-k_folds = config['experiment']['k_folds']
+
+# Number of folds actually trained and evaluated:
+#   - Cross-validation: every fold of the k-fold dataset.
+#   - No cross-validation (hold-out): only fold0 of the same k-fold dataset.
+n_folds_to_train = k_folds if do_cross_validation else 1
 
 # Dynamically derive (history_length, horizon) experiment pairs
 experiment_pairs = get_experiment_pairs(config['experiment'])
@@ -154,6 +185,7 @@ minimum_sensor_reading = config['sensor_limits']['minimum_reading']
 maximum_sensor_reading = config['sensor_limits']['maximum_reading']
 
 # Extracting paths
+source_data_path = config['paths']['path_to_load']
 windows_path = config['paths']['windows_path']
 experiment_base_path = config['paths']['experiment_base_path']
 central_models_path = config['paths']['central_models_path']
@@ -161,7 +193,6 @@ central_models_path = config['paths']['central_models_path']
 # ---------------------------------------------------------
 # 6. METADATA AND LOGGING VARIABLES (README)
 # ---------------------------------------------------------
-dataset_name = config['metadata']['dataset_name']
 dataset_link = config['metadata']['link']
 
 training_data = config['metadata']['training_data']
@@ -170,8 +201,8 @@ testing_data = config['metadata']['testing_data']
 wise_level = config['metadata']['wise_level']
 
 # Dynamic variables based on experiment setup
-cross_validation = 'k-fold' if do_cross_validation else 'No'
-Folds = str(k_folds) if do_cross_validation else '1'
+cross_validation = 'k-fold' if do_cross_validation else 'No (hold-out on fold0)'
+Folds = str(n_folds_to_train)
 
 # ----------------------- Console Tee Logic -----------------------
 class Tee:
@@ -195,8 +226,6 @@ class Tee:
                 except (IOError, ValueError):
                     pass
 
-# RUN_TS = datetime.datetime.now()
-# GLOBAL_RUN_ID = RUN_TS.strftime("%Y%m%d_%H%M%S")
 original_stdout = sys.stdout
 original_stderr = sys.stderr
 
@@ -205,7 +234,6 @@ def print_system_info(experiment_start_time):
     print("📅 Date & Time")
     print("-----------------------------------")
     print(f"Experiment Start Time: {experiment_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    # print(f"Current Time: {datetime.datetime.now()}")
     print("\n🖥️  System & Hardware")
     print("-----------------------------------")
     print(f"Hostname         : {socket.gethostname()}")
@@ -304,7 +332,6 @@ def build_experiment_dir(base_path: str, dataset_name: str, algorithm_name: str,
     # Combine the base path with the experiment folder name
     base = os.path.join(base_path, exp_folder_name)
 
-    # exp_dir = next_versioned_dir(base)
     exp_dir = base  # Use the base name directly without versioning
     for sub in ["models", "plots/training", "results/predictions", "results/evaluation/metrics",
                 "results/evaluation/figures", "summaries", "readmes"]:
@@ -381,15 +408,17 @@ def write_fold_json_and_md(exp_dir, base_name, loss_name, algo, ph, fold_idx, fo
 
 
 # ----------------------- Main README writer -----------------------
-def write_experiment_readme(exp_dir, base_name, loss_name, algo, ph, history_len, k_folds):
+def write_experiment_readme(exp_dir, base_name, loss_name, algo, ph, history_len, n_folds):
     exp_name, git_info = os.path.basename(exp_dir), get_git_info()
     prod_prefix = f"{base_name}_PRODUCTION"
-    
+
     lines = [f"# Experiment Summary: `{exp_name}`\n",
              f"- **Run ID**: `{GLOBAL_RUN_ID}`", f"- **Date**: `{RUN_TS.strftime('%Y-%m-%d %H:%M:%S')}`\n",
              "## 🧪 Experiment Configuration\n",
              f"- **Algorithm**: `{algo}`", f"- **Loss Function**: `{loss_name}`",
              f"- **Prediction Horizon (PH)**: `{ph}`", f"- **History Length (H)**: `{history_len}`",
+             f"- **Cross-validation**: `{cross_validation}`",
+             f"- **Folds trained**: `{n_folds}` of `{k_folds}`",
              f"- **batch_size**: `{batch_size}`", f"- **patience**: `{patience}`", f"- **max_epoch**: `{max_epoch}`\n",
              "## 📊 Quick Links\n",
              "- [TensorBoard Logs](./models/)",
@@ -397,15 +426,15 @@ def write_experiment_readme(exp_dir, base_name, loss_name, algo, ph, history_len
              "- [Aggregated Metrics](./results/evaluation/metrics/)",
              "- [Clarke Error Grid (CEG) Plots](./results/evaluation/figures/)",
              "- [Detailed Log File](./experiment_log.out)\n",
-             "---", 
+             "---",
              "\n## 🚀 Production Model (Deployment-Ready)\n",
              "This model is trained on a dedicated dataset split guaranteeing zero data leakage.\n",
              f"- **Weights (.h5)**: `models/{prod_prefix}.weights.h5`\n",
              f"- **Best Epoch Metadata**: `models/{prod_prefix}.best.json`\n",
              f"- **Training History**: `models/{prod_prefix}_history.csv`\n",
-             "---\n", f"\n## 📂 Fold Details ({k_folds} folds)\n"]
-             
-    for i in range(1, k_folds + 1):
+             "---\n", f"\n## 📂 Fold Details ({n_folds} folds)\n"]
+
+    for i in range(1, n_folds + 1):
         p = f"{base_name}_Fold{i}"
         lines.extend(
             [f"### Fold {i}\n", f"- **Weights**: `models/{p}.weights.h5`", f"- **History**: `models/{p}_history.csv`",
@@ -419,9 +448,44 @@ def write_experiment_readme(exp_dir, base_name, loss_name, algo, ph, history_len
 try:
     sys.stdout = Tee(original_stdout)
     print("Starting script execution...")
+    print(f"Evaluation mode: {cross_validation} | Folds to train: {n_folds_to_train} of {k_folds}")
 
-    # Recorrido unificado de las parejas (historia, horizonte)
+    # Unified iteration over (history, horizon) pairs
     for current_historic, current_PH in experiment_pairs:
+
+        # SINGLE SOURCE OF TRUTH for dataset file names and paths
+        dataset_file_name = f"{dataset_name}_H{current_historic}_PH{current_PH}_kfold{k_folds}"
+        dataset_file_name_nofold = f"{dataset_name}_H{current_historic}_PH{current_PH}"
+        data_file_path = os.path.join(windows_path, f"{dataset_file_name}.parquet")
+
+        # Check if the dataset file already exists; generate on-the-fly via dataset_builder if missing
+        if not os.path.exists(data_file_path):
+            print(f"\n[INFO] Dataset artifact not found: {data_file_path}")
+            print(f"[INFO] Invoking dataset_builder API to generate H={current_historic}, PH={current_PH}...")
+
+            build_single_dataset(
+                source_data_path=source_data_path,
+                dataset_name=dataset_name,
+                glucose_column_name=glucose_column_name,
+                id_column_name=id_column_name,
+                historic=current_historic,
+                ph=current_PH,
+                deduplicate_intra_patient=deduplicate_intra_patient,
+                save_pure_windows=False,
+                output_pure_windows_dir=None,
+                generate_folds=True,
+                output_folds_dir=windows_path,
+                k_folds=k_folds,
+                random_seed=folds_random_seed
+            )
+
+            if not os.path.exists(data_file_path):
+                raise FileNotFoundError(
+                    f"Dataset generation finished but the expected file was not found: {data_file_path}. "
+                    "Check that 'paths.windows_path' ends with a path separator."
+                )
+            print(f"[INFO] Dataset generation completed successfully.\n")
+
         used_columns = [f"x{i}" for i in range(current_historic)] + ["y"]
         info_columns = ['patient_id', f"x{current_historic - 1}_time", f"x{current_historic - 1}_date"]
 
@@ -431,18 +495,14 @@ try:
             np.random.seed(global_seed)
             tf.random.set_seed(global_seed)
             random.seed(global_seed)
-            k_folds = 5 if do_cross_validation else 1
 
             for current_algorithm in algorithms:
                 global RUN_TS, GLOBAL_RUN_ID
                 RUN_TS = datetime.datetime.now()
                 GLOBAL_RUN_ID = RUN_TS.strftime("%Y%m%d_%H%M%S")
 
-                dataset_file_name = f"{dataset_name}_H{current_historic}_PH{current_PH}_kfold{k_folds}"
-                dataset_file_name_nofold = f"{dataset_name}_H{current_historic}_PH{current_PH}"
-                # SINGLE SOURCE OF TRUTH NAMES
                 base_name = f"{dataset_file_name_nofold}-{current_algorithm}-{loss_function_name}"
-                
+
                 EXP_DIR = build_experiment_dir(base_path=experiment_base_path,
                                                dataset_name=dataset_file_name_nofold,
                                                algorithm_name=current_algorithm, loss_name=loss_function_name)
@@ -453,6 +513,7 @@ try:
                     sys.stdout = sys.stderr = Tee(original_stdout, exp_log_file)
 
                     print(f"================\nStarting Experiment: {os.path.basename(EXP_DIR)}\n================")
+                    print(f"Evaluation mode: {cross_validation} | Folds to train: {n_folds_to_train} of {k_folds}")
                     print_system_info(RUN_TS)
                     print("-----------------------------------\n")
 
@@ -470,12 +531,11 @@ try:
                     aggregated_results_out_of_range = []
                     aggregated_results_number_of_points = []
 
-                    for i in range(k_folds):
+                    for i in range(n_folds_to_train):
                         current_fold = i + 1
                         current_name = f"{base_name}_Fold{current_fold}"
-                        data_file_path = f"{windows_path}{dataset_file_name}.parquet"
 
-                        print(f"\n---- Loading data for Fold {current_fold}/{k_folds} from: {data_file_path} ----")
+                        print(f"\n---- Loading data for Fold {current_fold}/{n_folds_to_train} from: {data_file_path} ----")
                         df = pd.read_parquet(data_file_path)
 
                         df_train = df[df[f'fold{i}'] == 'train']
@@ -714,7 +774,7 @@ try:
                     fold_number = 1
                     for df_current_result in aggregated_results:
                         print()
-                        print('Agregating metrics for fold ', fold_number)
+                        print(f'Aggregating metrics for fold {fold_number}')
 
                         df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(
                             df_result_vector=df_current_result,
@@ -744,11 +804,13 @@ try:
                         aggregated_results_out_of_range.append(df_out_of_limits)
 
                         print()
-                        print('Aggregated metrics for fold ', fold_number, ' done.')
+                        print(f'Aggregated metrics for fold {fold_number} done.')
                         fold_number += 1
 
                     print()
                     print('Calculating aggregated metrics across folds (Metric-Then-Aggregate)...')
+                    if n_folds_to_train == 1:
+                        print('NOTE: only one fold was trained (hold-out mode); standard deviations will be NaN.')
 
                     df_metrics_performance_agg = pd.concat(aggregated_results_performance, ignore_index=True)
                     df_metrics_performance_agg.round(2).to_csv(os.path.join(METRICS_DIR,
@@ -801,7 +863,7 @@ try:
                     df_all_folds = pd.concat(aggregated_results, ignore_index=True)
                     df_all_folds.to_parquet(os.path.join(PRED_DIR,
                                                          f'df_test_results_vectors_{base_name}_ALL.parquet'))
-                    print(f'\nAggregated all {k_folds} folds. Total rows: {len(df_all_folds)}')
+                    print(f'\nAggregated all {n_folds_to_train} folds. Total rows: {len(df_all_folds)}')
 
                     df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(df_all_folds,
                                                                                                   f'_{base_name}_ALL',
@@ -821,7 +883,7 @@ try:
                     print('Metrics for all folds calculated and saved.')
 
                     write_experiment_readme(EXP_DIR, base_name, loss_function_name, current_algorithm, current_PH,
-                                            current_historic, k_folds)
+                                            current_historic, n_folds_to_train)
                     print(f"Main README.md created at: {os.path.join(EXP_DIR, 'README.md')}")
 
                     experiment_end_time = datetime.datetime.now()

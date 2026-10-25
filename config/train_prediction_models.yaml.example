@@ -2,14 +2,29 @@
 # Training Configuration File
 # ==========================================
 
-experiment:
+# Dataset definition (same structure as generate_prediction_windows.yaml).
+# Used to locate the windows file and, if missing, to generate it on-the-fly.
+dataset:
+  name: "dataset_name"
+  glucose_column: "15min" # Timestamp column of the source data (regular 15-minute grid)
+  id_column: "patient_id"
+
+# Fold generation parameters. Keep them identical to generate_prediction_windows.yaml
+# so that datasets generated on-the-fly are the same as those generated in batch.
+folds:
+  k_folds: 5 # Must be >= 2 (also used when do_cross_validation is false)
   random_seed: 42
-  do_cross_validation: true
-  k_folds: 5
+  disable_deduplication: false
+
+experiment:
+  random_seed: 42 # Training seed (Python, NumPy, TensorFlow)
+  do_cross_validation: true # false -> hold-out: only fold0 is trained/evaluated (+ production model)
   algorithms: ["Linear", "LSTM"] # Options: ["Linear", "LSTM", "CNN"]
   loss_functions: ["RMSE", "cSigP01", "cSigP06"] # Options: ["RMSE", "cSigP01", "cSigP06", "gMSE", "gMAD", "cSigMSEP01", "cSigMSEP06"]
   history_lengths: [8, 12, 16] # Options: [2, 4, 8, 12, 16, 20, ...]
   horizons: [6, 7, 8, 9] # Options: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ...]
+  # Alternative to history_lengths (H proportional to PH):
+  # history_multipliers: [1, 2] # H = round(PH * multiplier)
 
 training_hyperparameters:
   batch_size: 4096
@@ -23,12 +38,12 @@ sensor_limits:
   maximum_reading: 401 # Maximum valid BGL measurement of the CGM data
 
 paths:
-  windows_path: "${PATH_TO_DATA_WINDOWS}"
+  path_to_load: "${PATH_TO_DATA}" # Source parquet file; only read if a windows file must be generated on-the-fly
+  windows_path: "${PATH_TO_DATA_WINDOWS}" # Folds directory; must end with a path separator
   experiment_base_path: "../../relief-t1d-experiments/experiments/"
   central_models_path: "../../relief-t1d-models/models"
 
 metadata:
-  dataset_name: "dataset_name"
   training_data: "70% dataset_name"
   validation_data: "10% dataset_name"
   testing_data: "20% dataset_name"
