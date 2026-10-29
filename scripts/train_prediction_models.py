@@ -73,6 +73,28 @@ def get_experiment_pairs(hyperparams_config):
 
     return pairs
 
+# Identifiers taken from the configuration become fields of the experiment directory name, where '_'
+# separates fields. Inside an identifier only letters, digits, '.' and '-' are allowed (e.g. 'REPLACE-BG-v1.0').
+IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9.-]+")
+
+def validate_identifiers(names, config_key):
+    """
+    Fails fast if any configured identifier cannot be used as a field of the experiment directory name.
+
+    Args:
+        names (list): Identifiers read from the configuration.
+        config_key (str): YAML key the identifiers come from, used in the error message.
+
+    Raises:
+        ValueError: If any identifier is not a string matching IDENTIFIER_PATTERN.
+    """
+    invalid = [name for name in names if not isinstance(name, str) or not IDENTIFIER_PATTERN.fullmatch(name)]
+    if invalid:
+        raise ValueError(
+            f"Invalid value(s) in '{config_key}': {invalid}. Only letters, digits, '.' and '-' are allowed "
+            "('_' is reserved as the field separator of the experiment directory name), e.g. 'REPLACE-BG-v1.0'."
+        )
+
 # Load the configuration file and dynamically expand environment variables (e.g., ${PATH_TO_DATA})
 cli_args = parse_arguments()
 with open(cli_args.config, 'r', encoding='utf-8') as f:
@@ -165,6 +187,11 @@ if k_folds < 2:
 loss_function_name_list = config['experiment']['loss_functions']
 algorithms = config['experiment']['algorithms']
 do_cross_validation = config['experiment']['do_cross_validation']
+
+# Fail fast, before any dataset generation or training, on identifiers that would break the directory name
+validate_identifiers([dataset_name], "dataset.name")
+validate_identifiers(algorithms, "experiment.algorithms")
+validate_identifiers(loss_function_name_list, "experiment.loss_functions")
 
 # Number of folds actually trained and evaluated:
 #   - Cross-validation: every fold of the k-fold dataset.
@@ -303,8 +330,12 @@ def get_git_info():
 
 
 # ----------------------- Experiment directory helpers -----------------------
-def safe_token(s: str) -> str:
-    return re.sub(r'[^A-Za-z0-9_.-]+', '_', str(s))
+# ISO 8601 basic format with second resolution (e.g. 20261028T080012). Used as experiment directory prefix
+# and as run ID.
+RUN_TS_FORMAT = "%Y%m%dT%H%M%S"
+
+EXPERIMENT_SUBDIRS = ["models", "plots/training", "results/predictions", "results/evaluation/metrics",
+                      "results/evaluation/figures", "summaries", "readmes"]
 
 
 def safe_relpath(p, start=None):
@@ -372,30 +403,66 @@ def evaluation_table_path(metrics_dir: str, table_name: str, suffix: str = "") -
     return os.path.join(metrics_dir, f"{table_name}{suffix}.csv")
 
 
-def next_versioned_dir(base_name: str) -> str:
-    rx = re.compile(r"^(.*?)(?:-v(\d+))?$")
-    m = rx.match(base_name)
-    stem, v = m.group(1), m.group(2)
-    vnum = int(v) if v else 1
-    while True:
-        candidate = f"{stem}-v{vnum}"
-        if not os.path.exists(candidate):
-            return candidate
-        vnum += 1
+def build_experiment_dir_name(run_ts: datetime.datetime, dataset: str, history_len: int, ph: int,
+                              algorithm_name: str, loss_name: str) -> str:
+    """
+    Builds the experiment directory name: '{timestamp}_pred_{dataset}_H{h}_PH{ph}_{algorithm}_{loss}'.
+
+    Fields are separated by '_'; identifiers only contain letters, digits, '.' and '-' (see
+    validate_identifiers), so the name can be split on '_' unambiguously.
+
+    Args:
+        run_ts (datetime.datetime): Start time of the experiment.
+        dataset (str): Dataset name (e.g. 'REPLACE-BG-v1.0').
+        history_len (int): History length (H).
+        ph (int): Prediction horizon (PH).
+        algorithm_name (str): Algorithm name (e.g. 'Linear').
+        loss_name (str): Loss function name (e.g. 'RMSE').
+
+    Returns:
+        str: Experiment directory name (e.g. '20261028T080012_pred_REPLACE-BG-v1.0_H8_PH4_Linear_RMSE').
+    """
+    return (f"{run_ts.strftime(RUN_TS_FORMAT)}_pred_{dataset}_H{history_len}_PH{ph}"
+            f"_{algorithm_name}_{loss_name}")
 
 
-def build_experiment_dir(base_path: str, dataset_name: str, algorithm_name: str, loss_name: str) -> str:
-    date_str = RUN_TS.strftime("%Y%m%d%H%M")
-    exp_folder_name = f"{date_str}-pred-{safe_token(dataset_name)}-{safe_token(algorithm_name)}-{safe_token(loss_name)}"
+def create_experiment_dirs(base_path: str, central_path: str, exp_folder_name: str) -> tuple[str, str]:
+    """
+    Creates the experiment directory (with its subdirectories) and its folder in the central models hub.
 
-    # Combine the base path with the experiment folder name
-    base = os.path.join(base_path, exp_folder_name)
+    Both must be new: artifact names inside them are generic, so reusing an existing directory would
+    silently overwrite the artifacts of another run.
 
-    exp_dir = base  # Use the base name directly without versioning
-    for sub in ["models", "plots/training", "results/predictions", "results/evaluation/metrics",
-                "results/evaluation/figures", "summaries", "readmes"]:
-        os.makedirs(os.path.join(exp_dir, sub), exist_ok=True)
-    return exp_dir
+    Args:
+        base_path (str): Base directory of the experiments.
+        central_path (str): Base directory of the central models hub.
+        exp_folder_name (str): Experiment directory name (see build_experiment_dir_name).
+
+    Returns:
+        tuple[str, str]: Experiment directory and its central models hub directory.
+
+    Raises:
+        FileExistsError: If either directory already exists. Nothing is left behind in that case.
+    """
+    exp_dir = os.path.join(base_path, exp_folder_name)
+    hub_dir = os.path.join(central_path, exp_folder_name)
+
+    # os.makedirs with exist_ok=False is atomic for the last component, so concurrent runs cannot share a folder
+    try:
+        os.makedirs(exp_dir, exist_ok=False)
+    except FileExistsError:
+        raise FileExistsError(f"Experiment directory already exists: {exp_dir}. "
+                              "Another run with the same configuration started in the same second.") from None
+    try:
+        os.makedirs(hub_dir, exist_ok=False)
+    except FileExistsError:
+        os.rmdir(exp_dir)  # Still empty: remove it so that the failed run leaves no trace
+        raise FileExistsError(f"Central models hub directory already exists: {hub_dir}. "
+                              "Remove it or check which run produced it.") from None
+
+    for sub in EXPERIMENT_SUBDIRS:
+        os.makedirs(os.path.join(exp_dir, sub), exist_ok=False)
+    return exp_dir, hub_dir
 
 
 # ----------------------- Keras callbacks -----------------------
@@ -551,7 +618,6 @@ try:
 
         # SINGLE SOURCE OF TRUTH for dataset file names and paths
         dataset_file_name = f"{dataset_name}_H{current_historic}_PH{current_PH}_kfold{k_folds}"
-        dataset_file_name_nofold = f"{dataset_name}_H{current_historic}_PH{current_PH}"
         data_file_path = os.path.join(windows_path, f"{dataset_file_name}.parquet")
 
         # Check if the dataset file already exists; generate on-the-fly via dataset_builder if missing
@@ -595,11 +661,12 @@ try:
             for current_algorithm in algorithms:
                 global RUN_TS, GLOBAL_RUN_ID
                 RUN_TS = datetime.datetime.now()
-                GLOBAL_RUN_ID = RUN_TS.strftime("%Y%m%d_%H%M%S")
+                GLOBAL_RUN_ID = RUN_TS.strftime(RUN_TS_FORMAT)
 
-                EXP_DIR = build_experiment_dir(base_path=experiment_base_path,
-                                               dataset_name=dataset_file_name_nofold,
-                                               algorithm_name=current_algorithm, loss_name=loss_function_name)
+                exp_folder_name = build_experiment_dir_name(RUN_TS, dataset_name, current_historic, current_PH,
+                                                            current_algorithm, loss_function_name)
+                EXP_DIR, CENTRAL_EXP_MODELS_DIR = create_experiment_dirs(experiment_base_path, central_models_path,
+                                                                         exp_folder_name)
                 exp_log_file = None
                 try:
                     exp_log_file_path = os.path.join(EXP_DIR, "experiment.log")
@@ -616,9 +683,6 @@ try:
                     PLOTS_TRAIN_DIR = os.path.join(EXP_DIR, "plots", "training")
                     METRICS_DIR = os.path.join(EXP_DIR, "results", "evaluation", "metrics")
                     FIGURES_DIR = os.path.join(EXP_DIR, "results", "evaluation", "figures")
-
-                    CENTRAL_EXP_MODELS_DIR = os.path.join(central_models_path, os.path.basename(EXP_DIR))
-                    os.makedirs(CENTRAL_EXP_MODELS_DIR, exist_ok=True)
 
                     aggregated_results = []
                     aggregated_results_performance = []

@@ -3,7 +3,10 @@
 # ==========================================
 
 dataset:
-  name: "dataset_name"
+  # Used in dataset file names. Allowed characters: letters, digits, '.' and '-' (e.g. "REPLACE-BG-v1.0"):
+  # the training script rejects '_', which separates fields in its experiment directory names.
+  # Must match train_prediction_models.yaml.
+  name: "dataset-name"
   glucose_column: "15min" # Timestamp column of the source data (regular 15-minute grid)
   id_column: "patient_id"
 

@@ -5,7 +5,9 @@
 # Dataset definition (same structure as generate_prediction_windows.yaml).
 # Used to locate the windows file and, if missing, to generate it on-the-fly.
 dataset:
-  name: "dataset_name"
+  # Used in dataset file names and in the experiment directory name, where '_' separates fields.
+  # Allowed characters: letters, digits, '.' and '-' (e.g. "REPLACE-BG-v1.0"). Must match generate_prediction_windows.yaml.
+  name: "dataset-name"
   glucose_column: "15min" # Timestamp column of the source data (regular 15-minute grid)
   id_column: "patient_id"
 
@@ -19,6 +21,7 @@ folds:
 experiment:
   random_seed: 42 # Training seed (Python, NumPy, TensorFlow)
   do_cross_validation: true # false -> hold-out: only fold0 is trained/evaluated (+ production model)
+  # Algorithm and loss names are fields of the experiment directory name (letters, digits, '.' and '-' only)
   algorithms: ["Linear", "LSTM"] # Options: ["Linear", "LSTM", "CNN"]
   loss_functions: ["RMSE", "cSigP01", "cSigP06"] # Options: ["RMSE", "cSigP01", "cSigP06", "gMSE", "gMAD", "cSigMSEP01", "cSigMSEP06"]
   history_lengths: [8, 12, 16] # Options: [2, 4, 8, 12, 16, 20, ...]
@@ -44,8 +47,8 @@ paths:
   central_models_path: "../../relief-t1d-models/models"
 
 metadata:
-  training_data: "70% dataset_name"
-  validation_data: "10% dataset_name"
-  testing_data: "20% dataset_name"
+  training_data: "70% dataset-name"
+  validation_data: "10% dataset-name"
+  testing_data: "20% dataset-name"
   wise_level: "patient"
   link: "link/to/ids"
