@@ -123,6 +123,7 @@ import psutil
 import subprocess
 import pandas as pd
 import shutil
+from typing import Optional
 
 # ---------------------------------------------------------
 # 4. IMPORTS FROM INTERNAL MODULAR LIBRARY (src/)
@@ -313,6 +314,64 @@ def safe_relpath(p, start=None):
         return p
 
 
+# ----------------------- Artifact naming -----------------------
+# The experiment directory identifies the run (dataset, H, PH, algorithm, loss), so artifact names inside it
+# only describe what each file is. Naming rule (lowercase snake_case):
+#   - Per-fold artifacts: {type}_fold_{k}.{ext}, where k is 0-based and matches the 'fold{k}' dataset column.
+#   - Global artifacts:   {type}.{ext}, i.e. the production model in models/ and plots/training/, and the
+#                         aggregation over all evaluated folds in results/.
+def artifact_suffix(fold_idx: Optional[int] = None) -> str:
+    """
+    Returns the artifact name suffix for a fold, or an empty suffix for a global artifact.
+
+    Args:
+        fold_idx (Optional[int]): 0-based fold index, or None for a global artifact.
+
+    Returns:
+        str: '_fold_{fold_idx}' for a fold, '' otherwise.
+    """
+    return "" if fold_idx is None else f"_fold_{fold_idx}"
+
+
+def model_artifact_paths(models_dir: str, plots_dir: str, fold_idx: Optional[int] = None) -> dict:
+    """
+    Builds the paths of the training artifacts of one model (fold model or production model).
+
+    Args:
+        models_dir (str): Directory of the model artifacts (weights, best epoch, history, TensorBoard logs).
+        plots_dir (str): Directory of the training plots.
+        fold_idx (Optional[int]): 0-based fold index, or None for the production model.
+
+    Returns:
+        dict: Paths keyed by 'weights', 'best_epoch', 'history', 'tensorboard' and 'loss_plot'.
+    """
+    suffix = artifact_suffix(fold_idx)
+    return {
+        # Keras 3 requires weights-only files to end with '.weights.h5'
+        "weights": os.path.join(models_dir, f"model{suffix}.weights.h5"),
+        "best_epoch": os.path.join(models_dir, f"best_epoch{suffix}.json"),
+        "history": os.path.join(models_dir, f"history{suffix}.csv"),
+        "tensorboard": os.path.join(models_dir, f"tensorboard{suffix}"),
+        "loss_plot": os.path.join(plots_dir, f"loss{suffix}.pdf"),
+    }
+
+
+def evaluation_table_path(metrics_dir: str, table_name: str, suffix: str = "") -> str:
+    """
+    Builds the path of an evaluation table.
+
+    Args:
+        metrics_dir (str): Directory of the evaluation tables.
+        table_name (str): Table type: 'performance_by_range', 'ceg_zone_counts' or 'prediction_limits'.
+        suffix (str): '_fold_{k}' for one fold, or the aggregation scope: '_per_fold' (fold tables stacked),
+            '_metric_then_aggregate', '_metric_then_aggregate_report' or '_aggregate_then_metric'.
+
+    Returns:
+        str: Path of the CSV file.
+    """
+    return os.path.join(metrics_dir, f"{table_name}{suffix}.csv")
+
+
 def next_versioned_dir(base_name: str) -> str:
     rx = re.compile(r"^(.*?)(?:-v(\d+))?$")
     m = rx.match(base_name)
@@ -340,33 +399,64 @@ def build_experiment_dir(base_path: str, dataset_name: str, algorithm_name: str,
 
 
 # ----------------------- Keras callbacks -----------------------
-def make_callbacks(filepath_prefix: str, early_stopping_patience: int):
+def make_callbacks(artifact_paths: dict, early_stopping_patience: int):
     return [
-        keras.callbacks.ModelCheckpoint(filepath=f"{filepath_prefix}.weights.h5", monitor='val_loss', mode='min',
+        keras.callbacks.ModelCheckpoint(filepath=artifact_paths["weights"], monitor='val_loss', mode='min',
                                         save_best_only=True, save_weights_only=True, verbose=1),
         keras.callbacks.EarlyStopping(monitor='val_loss', mode='min', patience=early_stopping_patience,
                                       restore_best_weights=True, verbose=1),
-        keras.callbacks.TensorBoard(log_dir=f"{filepath_prefix}_logs", histogram_freq=0, write_graph=True,
+        keras.callbacks.TensorBoard(log_dir=artifact_paths["tensorboard"], histogram_freq=0, write_graph=True,
                                     write_images=False, update_freq='epoch', profile_batch=0),
-        keras.callbacks.CSVLogger(filename=f"{filepath_prefix}_history.csv", separator=',', append=False)
+        keras.callbacks.CSVLogger(filename=artifact_paths["history"], separator=',', append=False)
     ]
 
 
 # ----------------------- Train function -----------------------
-def train(x_train, y_train, x_val, y_val, model, history_len, save_prefix="", early_stopping_patience=patience):
+def train(x_train, y_train, x_val, y_val, model, history_len, artifact_paths, early_stopping_patience=patience):
     if len(model.input_shape) == 3:
         x_train = x_train.reshape(x_train.shape[0], history_len, 1)
         x_val = x_val.reshape(x_val.shape[0], history_len, 1)
     hist = model.fit(x_train, y_train, batch_size=batch_size, validation_data=(x_val, y_val), epochs=max_epoch,
-                     callbacks=make_callbacks(save_prefix, early_stopping_patience))
+                     callbacks=make_callbacks(artifact_paths, early_stopping_patience))
     return hist, model
 
 
+# ----------------------- Best epoch metadata -----------------------
+def write_best_epoch_json(artifact_paths: dict, context: dict) -> None:
+    """
+    Writes the best-epoch metadata of a trained model, read from its CSV training history.
+
+    Args:
+        artifact_paths (dict): Model artifact paths returned by `model_artifact_paths`.
+        context (dict): Identification of the model (model type, fold, loss, algorithm, H, PH, run ID).
+            It is stored in the file because the generic file name does not identify the model.
+    """
+    try:
+        df_hist = pd.read_csv(artifact_paths["history"])
+        monitor = "val_loss" if 'val_loss' in df_hist.columns else "loss"
+        best_idx = int(df_hist[monitor].idxmin())
+        best_payload = {
+            "monitor": monitor,
+            "epoch_idx": best_idx,
+            "epoch_count": int(df_hist.shape[0]),
+            "metrics": df_hist.iloc[best_idx].to_dict(),
+            "artifacts": {
+                "weights_path": os.path.abspath(artifact_paths["weights"]),
+                "history_csv_path": os.path.abspath(artifact_paths["history"])
+            },
+            "context": context,
+            "created_at": datetime.datetime.now().isoformat()
+        }
+        with open(artifact_paths["best_epoch"], "w", encoding="utf-8") as f:
+            json.dump(best_payload, f, indent=2)
+    except Exception as e:
+        print(f"WARNING: could not write {artifact_paths['best_epoch']}: {e}")
+
+
 # ----------------------- Per-fold JSON/MD writers -----------------------
-def write_fold_json_and_md(exp_dir, base_name, loss_name, algo, ph, fold_idx, fold_started_at, train_sec, train_hms, pred_sec,
-                           pred_hms, weights_path, hist_csv_path, best_json_path, preds_parquet_path,
-                           training_plot_prefix, history_len, do_cv, min_sensor, max_sensor, data_file_path,
-                           data_counts):
+def write_fold_json_and_md(exp_dir, loss_name, algo, ph, fold_idx, fold_started_at, train_sec, train_hms, pred_sec,
+                           pred_hms, artifact_paths, preds_parquet_path, history_len, do_cv, min_sensor, max_sensor,
+                           data_file_path, data_counts):
     payload = {
         "experiment": {"loss": loss_name, "algorithm": algo, "prediction_horizon": ph, "fold": fold_idx,
                        "history_length": history_len, "cross_validation": do_cv,
@@ -376,8 +466,9 @@ def write_fold_json_and_md(exp_dir, base_name, loss_name, algo, ph, fold_idx, fo
         "timing": {"train_seconds": round(train_sec, 3), "train_elapsed": str(train_hms),
                    "predict_seconds": round(pred_sec, 3), "predict_elapsed": str(pred_hms)},
         "artifacts": {
-            "weights_path": weights_path, "history_csv_path": hist_csv_path, "best_json_path": best_json_path,
-            "predictions_parquet_path": preds_parquet_path, "training_plot_prefix": training_plot_prefix
+            "weights_path": artifact_paths["weights"], "history_csv_path": artifact_paths["history"],
+            "best_epoch_json_path": artifact_paths["best_epoch"], "tensorboard_dir": artifact_paths["tensorboard"],
+            "predictions_parquet_path": preds_parquet_path, "training_plot_path": artifact_paths["loss_plot"]
         },
         "git": get_git_info(),
         "system": {"hostname": socket.gethostname(), "os": f"{platform.system()} {platform.release()}",
@@ -387,13 +478,13 @@ def write_fold_json_and_md(exp_dir, base_name, loss_name, algo, ph, fold_idx, fo
     for key, val in payload["artifacts"].items():
         payload["artifacts"][key] = safe_relpath(val, start=exp_dir)
 
-    json_name = os.path.join(exp_dir, "summaries", f"summary_{base_name}_Fold{fold_idx}.json")
+    json_name = os.path.join(exp_dir, "summaries", f"summary{artifact_suffix(fold_idx)}.json")
     with open(json_name, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
-    md_name = os.path.join(exp_dir, "readmes", f"README_{base_name}_Fold{fold_idx}.md")
+    md_name = os.path.join(exp_dir, "readmes", f"readme{artifact_suffix(fold_idx)}.md")
     with open(md_name, "w", encoding="utf-8") as f:
-        f.write(f"# Fold {fold_idx} Summary for {loss_name}/{algo}/PH={ph}\n\n")
+        f.write(f"# Fold {fold_idx} Summary for {loss_name}/{algo}/H={history_len}/PH={ph}\n\n")
         f.write(f"**Data File**: `{os.path.abspath(data_file_path)}`\n\n")
         f.write("| Split | Patient Count | Window Count | % Patients | % Windows |\n")
         f.write("|-------|---------------|--------------|------------|-----------|\n")
@@ -408,9 +499,8 @@ def write_fold_json_and_md(exp_dir, base_name, loss_name, algo, ph, fold_idx, fo
 
 
 # ----------------------- Main README writer -----------------------
-def write_experiment_readme(exp_dir, base_name, loss_name, algo, ph, history_len, n_folds):
+def write_experiment_readme(exp_dir, loss_name, algo, ph, history_len, n_folds):
     exp_name, git_info = os.path.basename(exp_dir), get_git_info()
-    prod_prefix = f"{base_name}_PRODUCTION"
 
     lines = [f"# Experiment Summary: `{exp_name}`\n",
              f"- **Run ID**: `{GLOBAL_RUN_ID}`", f"- **Date**: `{RUN_TS.strftime('%Y-%m-%d %H:%M:%S')}`\n",
@@ -422,25 +512,31 @@ def write_experiment_readme(exp_dir, base_name, loss_name, algo, ph, history_len
              f"- **batch_size**: `{batch_size}`", f"- **patience**: `{patience}`", f"- **max_epoch**: `{max_epoch}`\n",
              "## 📊 Quick Links\n",
              "- [TensorBoard Logs](./models/)",
-             f"- [Aggregated Predictions](./results/predictions/df_test_results_vectors_{base_name}_ALL.parquet)",
+             "- [Aggregated Predictions](./results/predictions/predictions.parquet)",
              "- [Aggregated Metrics](./results/evaluation/metrics/)",
              "- [Clarke Error Grid (CEG) Plots](./results/evaluation/figures/)",
-             "- [Detailed Log File](./experiment_log.out)\n",
+             "- [Detailed Log File](./experiment.log)\n",
+             "## 🗂️ Artifact Naming\n",
+             "- `{type}_fold_{k}.{ext}`: artifact of fold `k` (0-based; dataset column `fold{k}`).",
+             "- `{type}.{ext}` (no suffix): production model in `models/` and `plots/training/`; "
+             "aggregation over all evaluated folds in `results/`.\n",
              "---",
              "\n## 🚀 Production Model (Deployment-Ready)\n",
              "This model is trained on a dedicated dataset split guaranteeing zero data leakage.\n",
-             f"- **Weights (.h5)**: `models/{prod_prefix}.weights.h5`\n",
-             f"- **Best Epoch Metadata**: `models/{prod_prefix}.best.json`\n",
-             f"- **Training History**: `models/{prod_prefix}_history.csv`\n",
+             "- **Weights (.h5)**: `models/model.weights.h5`\n",
+             "- **Best Epoch Metadata**: `models/best_epoch.json`\n",
+             "- **Training History**: `models/history.csv`\n",
+             "- **Training Curve**: `plots/training/loss.pdf`\n",
              "---\n", f"\n## 📂 Fold Details ({n_folds} folds)\n"]
 
-    for i in range(1, n_folds + 1):
-        p = f"{base_name}_Fold{i}"
+    for fold_idx in range(n_folds):
+        s = artifact_suffix(fold_idx)
         lines.extend(
-            [f"### Fold {i}\n", f"- **Weights**: `models/{p}.weights.h5`", f"- **History**: `models/{p}_history.csv`",
-             f"- **Best Epoch**: `models/{p}.best.json`",
-             f"- **Predictions**: `results/predictions/test_results_vectors_{p}.parquet`",
-             f"- **Detailed Summary**: `readmes/README_{p}.md`\n"])
+            [f"### Fold {fold_idx}\n", f"- **Weights**: `models/model{s}.weights.h5`",
+             f"- **History**: `models/history{s}.csv`",
+             f"- **Best Epoch**: `models/best_epoch{s}.json`",
+             f"- **Predictions**: `results/predictions/predictions{s}.parquet`",
+             f"- **Detailed Summary**: `readmes/readme{s}.md`\n"])
     with open(os.path.join(exp_dir, "README.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
@@ -501,14 +597,12 @@ try:
                 RUN_TS = datetime.datetime.now()
                 GLOBAL_RUN_ID = RUN_TS.strftime("%Y%m%d_%H%M%S")
 
-                base_name = f"{dataset_file_name_nofold}-{current_algorithm}-{loss_function_name}"
-
                 EXP_DIR = build_experiment_dir(base_path=experiment_base_path,
                                                dataset_name=dataset_file_name_nofold,
                                                algorithm_name=current_algorithm, loss_name=loss_function_name)
                 exp_log_file = None
                 try:
-                    exp_log_file_path = os.path.join(EXP_DIR, "experiment_log.out")
+                    exp_log_file_path = os.path.join(EXP_DIR, "experiment.log")
                     exp_log_file = open(exp_log_file_path, "a", encoding="utf-8")
                     sys.stdout = sys.stderr = Tee(original_stdout, exp_log_file)
 
@@ -531,22 +625,24 @@ try:
                     aggregated_results_out_of_range = []
                     aggregated_results_number_of_points = []
 
-                    for i in range(n_folds_to_train):
-                        current_fold = i + 1
-                        current_name = f"{base_name}_Fold{current_fold}"
+                    # Folds are 0-based everywhere: fold_idx k is the dataset column 'fold{k}' and the
+                    # '_fold_{k}' suffix of every artifact of that fold.
+                    for fold_idx in range(n_folds_to_train):
+                        fold_paths = model_artifact_paths(MODELS_DIR, PLOTS_TRAIN_DIR, fold_idx)
 
-                        print(f"\n---- Loading data for Fold {current_fold}/{n_folds_to_train} from: {data_file_path} ----")
+                        print(f"\n---- Loading data for Fold {fold_idx} [{fold_idx + 1}/{n_folds_to_train}] "
+                              f"from: {data_file_path} ----")
                         df = pd.read_parquet(data_file_path)
 
-                        df_train = df[df[f'fold{i}'] == 'train']
+                        df_train = df[df[f'fold{fold_idx}'] == 'train']
                         patients_train_number = df_train['patient_id'].nunique()
                         df_train = df_train.reset_index(drop=True)[used_columns]
 
-                        df_val = df[df[f'fold{i}'] == 'val']
+                        df_val = df[df[f'fold{fold_idx}'] == 'val']
                         patients_val_number = df_val['patient_id'].nunique()
                         df_val = df_val.reset_index(drop=True)[used_columns]
 
-                        df_test = df[df[f'fold{i}'] == 'test']
+                        df_test = df[df[f'fold{fold_idx}'] == 'test']
                         patients_test_number = df_test['patient_id'].nunique()
                         df_test_info = df_test.reset_index(drop=True)[info_columns]
                         df_test = df_test.reset_index(drop=True)[used_columns]
@@ -577,7 +673,7 @@ try:
                         x_test, y_test = df_test.iloc[:, :-1].to_numpy(), df_test.iloc[:, -1:].to_numpy()
                         del df, df_train, df_val, df_test  # Free memory
 
-                        print(f'\nSTART training {current_algorithm} - H={current_historic} | PH={current_PH} - Fold={current_fold}')
+                        print(f'\nSTART training {current_algorithm} - H={current_historic} | PH={current_PH} - Fold={fold_idx}')
 
                         # 1. Clean instantiation from architectures.py using the exact default metrics
                         model = get_compiled_model(
@@ -589,14 +685,13 @@ try:
 
                         fold_started_at = datetime.datetime.now()
                         start_time = time.time()
-                        save_prefix = os.path.join(MODELS_DIR, current_name)
-                        hist, model_trained = train(x_train, y_train, x_val, y_val, model, current_historic, save_prefix)
+                        hist, model_trained = train(x_train, y_train, x_val, y_val, model, current_historic, fold_paths)
                         train_time = time.time() - start_time
                         print(
-                            f'END training {current_algorithm} - Fold={current_fold} (Time: {datetime.timedelta(seconds=train_time)})\n')
+                            f'END training {current_algorithm} - Fold={fold_idx} (Time: {datetime.timedelta(seconds=train_time)})\n')
 
                         print('START prediction & saving artifacts...')
-                        weights_file = f"{save_prefix}.weights.h5"
+                        weights_file = fold_paths["weights"]
 
                         # 2. Instantiating model for prediction and loading the saved weights manually
                         model_load = get_compiled_model(
@@ -616,60 +711,41 @@ try:
                         # Concat arrays and tracking indices to generate test vectors
                         df_res = pd.DataFrame({'y_test': y_test.ravel(), 'y_predict': y_pred.ravel()})
                         df_res = pd.concat([df_res, df_test_info], axis=1)
-                        preds_path = os.path.join(PRED_DIR, f'test_results_vectors_{current_name}.parquet')
+                        preds_path = os.path.join(PRED_DIR, f'predictions{artifact_suffix(fold_idx)}.parquet')
                         df_res.to_parquet(preds_path)
                         aggregated_results.append(df_res)
 
-                        training_plot_prefix = os.path.join(PLOTS_TRAIN_DIR, current_name)
-                        get_train_plots_loss(hist, training_plot_prefix)
+                        get_train_plots_loss(hist, fold_paths["loss_plot"])
 
-                        hist_csv_path = f"{save_prefix}_history.csv"
-                        best_json_path = f"{save_prefix}.best.json"
-
-                        try:
-                            df_hist = pd.read_csv(hist_csv_path)
-                            best_idx = int(df_hist['val_loss'].idxmin() if 'val_loss' in df_hist.columns else df_hist[
-                                'loss'].idxmin())
-                            row = df_hist.iloc[best_idx].to_dict()
-                            best_payload = {
-                                "monitor": "val_loss" if 'val_loss' in df_hist.columns else "loss",
-                                "epoch_idx": best_idx, "epoch_count": int(df_hist.shape[0]), "metrics": row,
-                                "artifacts": {"weights_path": os.path.abspath(weights_file),
-                                              "history_csv_path": os.path.abspath(hist_csv_path)},
-                                "context": {"loss": loss_function_name, "algorithm": current_algorithm,
-                                            "prediction_horizon": current_PH, "history_length": current_historic,
-                                            "fold": current_fold, "run_id": GLOBAL_RUN_ID},
-                                "created_at": datetime.datetime.now().isoformat()
-                            }
-                            with open(best_json_path, "w", encoding="utf-8") as f:
-                                json.dump(best_payload, f, indent=2)
-                        except Exception as e:
-                            print(f"WARNING: could not write best.json for {current_name}: {e}")
+                        write_best_epoch_json(fold_paths, context={
+                            "model_type": "fold", "fold": fold_idx, "loss": loss_function_name,
+                            "algorithm": current_algorithm, "prediction_horizon": current_PH,
+                            "history_length": current_historic, "run_id": GLOBAL_RUN_ID
+                        })
 
                         write_fold_json_and_md(
-                            EXP_DIR, base_name, loss_function_name, current_algorithm, current_PH, current_fold,
+                            EXP_DIR, loss_function_name, current_algorithm, current_PH, fold_idx,
                             fold_started_at, train_time, datetime.timedelta(seconds=train_time),
                             pred_time, datetime.timedelta(seconds=pred_time),
-                            weights_path=weights_file, hist_csv_path=hist_csv_path, best_json_path=best_json_path,
-                            preds_parquet_path=preds_path, training_plot_prefix=training_plot_prefix,
+                            artifact_paths=fold_paths, preds_parquet_path=preds_path,
                             history_len=current_historic, do_cv=do_cross_validation,
                             min_sensor=minimum_sensor_reading, max_sensor=maximum_sensor_reading,
                             data_file_path=data_file_path, data_counts=data_counts
                         )
 
-                        # Duplicate weights and best.json metadata to the models repository
+                        # Duplicate weights and best epoch metadata to the models repository
                         try:
-                            if os.path.exists(weights_file):
-                                shutil.copy(weights_file, CENTRAL_EXP_MODELS_DIR)
-                            if os.path.exists(best_json_path):
-                                shutil.copy(best_json_path, CENTRAL_EXP_MODELS_DIR)
+                            if os.path.exists(fold_paths["weights"]):
+                                shutil.copy(fold_paths["weights"], CENTRAL_EXP_MODELS_DIR)
+                            if os.path.exists(fold_paths["best_epoch"]):
+                                shutil.copy(fold_paths["best_epoch"], CENTRAL_EXP_MODELS_DIR)
                             print(
-                                f"Successfully copied fold {current_fold} model artifacts to central hub: {CENTRAL_EXP_MODELS_DIR}")
+                                f"Successfully copied fold {fold_idx} model artifacts to central hub: {CENTRAL_EXP_MODELS_DIR}")
                         except Exception as e:
                             print(f"WARNING: Could not copy model artifacts to central hub: {e}")
 
                         print(
-                            f'END prediction & saving artifacts for Fold={current_fold} (Time: {datetime.timedelta(seconds=pred_time)})\n')
+                            f'END prediction & saving artifacts for Fold={fold_idx} (Time: {datetime.timedelta(seconds=pred_time)})\n')
 
                     # ====================================================================
                     # PRODUCTION MODEL TRAINING (DEPLOYMENT MODEL)
@@ -703,66 +779,35 @@ try:
                         metrics_list=[keras.metrics.RootMeanSquaredError(), ClinicalPenaltyLoss()]
                     )
 
-                    # 3. Define paths and train
-                    prod_name = f"{base_name}_PRODUCTION"
-                    prod_save_prefix = os.path.join(MODELS_DIR, prod_name)
+                    # 3. Define paths and train (production artifacts have no suffix)
+                    prod_paths = model_artifact_paths(MODELS_DIR, PLOTS_TRAIN_DIR)
 
                     prod_start_time = time.time()
                     prod_hist, prod_model_trained = train(
                         x_prod_train, y_prod_train,
                         x_prod_val, y_prod_val,
-                        prod_model, current_historic, prod_save_prefix
+                        prod_model, current_historic, prod_paths
                     )
                     prod_train_time = time.time() - prod_start_time
 
                     print(f'END training PRODUCTION MODEL (Time: {datetime.timedelta(seconds=prod_train_time)})\n')
 
                     # 4. Save training plots
-                    prod_training_plot_prefix = os.path.join(PLOTS_TRAIN_DIR, prod_name)
-                    get_train_plots_loss(prod_hist, prod_training_plot_prefix)
+                    get_train_plots_loss(prod_hist, prod_paths["loss_plot"])
 
-                    # 5. Extract best epoch metrics and save metadata (best.json)
-                    prod_weights_file = f"{prod_save_prefix}.weights.h5"
-                    prod_hist_csv_path = f"{prod_save_prefix}_history.csv"
-                    prod_best_json_path = f"{prod_save_prefix}.best.json"
-
-                    try:
-                        df_hist_prod = pd.read_csv(prod_hist_csv_path)
-                        best_idx_prod = int(
-                            df_hist_prod['val_loss'].idxmin() if 'val_loss' in df_hist_prod.columns else
-                            df_hist_prod['loss'].idxmin())
-                        row_prod = df_hist_prod.iloc[best_idx_prod].to_dict()
-
-                        prod_best_payload = {
-                            "monitor": "val_loss" if 'val_loss' in df_hist_prod.columns else "loss",
-                            "epoch_idx": best_idx_prod,
-                            "epoch_count": int(df_hist_prod.shape[0]),
-                            "metrics": row_prod,
-                            "artifacts": {
-                                "weights_path": os.path.abspath(prod_weights_file),
-                                "history_csv_path": os.path.abspath(prod_hist_csv_path)
-                            },
-                            "context": {
-                                "loss": loss_function_name,
-                                "algorithm": current_algorithm,
-                                "prediction_horizon": current_PH,
-                                "history_length": current_historic,
-                                "fold": "PRODUCTION",
-                                "run_id": GLOBAL_RUN_ID
-                            },
-                            "created_at": datetime.datetime.now().isoformat()
-                        }
-                        with open(prod_best_json_path, "w", encoding="utf-8") as f:
-                            json.dump(prod_best_payload, f, indent=2)
-                    except Exception as e:
-                        print(f"WARNING: could not write best.json for {prod_name}: {e}")
+                    # 5. Extract best epoch metrics and save metadata
+                    write_best_epoch_json(prod_paths, context={
+                        "model_type": "production", "fold": None, "loss": loss_function_name,
+                        "algorithm": current_algorithm, "prediction_horizon": current_PH,
+                        "history_length": current_historic, "run_id": GLOBAL_RUN_ID
+                    })
 
                     # 6. Copy production artifacts to the central model hub
                     try:
-                        if os.path.exists(prod_weights_file):
-                            shutil.copy(prod_weights_file, CENTRAL_EXP_MODELS_DIR)
-                        if os.path.exists(prod_best_json_path):
-                            shutil.copy(prod_best_json_path, CENTRAL_EXP_MODELS_DIR)
+                        if os.path.exists(prod_paths["weights"]):
+                            shutil.copy(prod_paths["weights"], CENTRAL_EXP_MODELS_DIR)
+                        if os.path.exists(prod_paths["best_epoch"]):
+                            shutil.copy(prod_paths["best_epoch"], CENTRAL_EXP_MODELS_DIR)
                         print(
                             f"Successfully copied PRODUCTION model artifacts to central hub: {CENTRAL_EXP_MODELS_DIR}")
                     except Exception as e:
@@ -771,87 +816,81 @@ try:
                     print("Production Model training and artifact saving completed successfully.\n")
 
                     # ------------------ Metric-Then-Aggregate approach ------------------
-                    fold_number = 1
-                    for df_current_result in aggregated_results:
+                    # aggregated_results is filled in fold order, so its position is the 0-based fold index
+                    for fold_idx, df_current_result in enumerate(aggregated_results):
                         print()
-                        print(f'Aggregating metrics for fold {fold_number}')
+                        print(f'Aggregating metrics for fold {fold_idx}')
+                        fold_suffix = artifact_suffix(fold_idx)
 
                         df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(
                             df_result_vector=df_current_result,
-                            grid_name=f'_{base_name}_Fold{fold_number}',
+                            figure_name=f'ceg{fold_suffix}',
                             show_plot=False,
                             plot_dir=FIGURES_DIR,
                             minimum_sensor_reading=minimum_sensor_reading,
                             maximum_sensor_reading=maximum_sensor_reading
                         )
-                        df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                            f'metrics_performance_{base_name}_Fold{fold_number}.csv'),
-                                                               index=False)
-                        df_metrics_performance['Fold'] = fold_number
+                        df_metrics_performance.round(2).to_csv(
+                            evaluation_table_path(METRICS_DIR, 'performance_by_range', fold_suffix), index=False)
+                        df_metrics_performance['Fold'] = fold_idx
 
-                        df_number_of_points.to_csv(os.path.join(METRICS_DIR,
-                                                                f'number_of_points_by_zones_{base_name}_Fold{fold_number}.csv'),
-                                                   index=False)
-                        df_number_of_points['Fold'] = fold_number
+                        df_number_of_points.to_csv(
+                            evaluation_table_path(METRICS_DIR, 'ceg_zone_counts', fold_suffix), index=False)
+                        df_number_of_points['Fold'] = fold_idx
 
-                        df_out_of_limits.to_csv(os.path.join(METRICS_DIR,
-                                                             f'predictions_out_of_limits_{base_name}_Fold{fold_number}.csv'),
-                                                index=False)
-                        df_out_of_limits['Fold'] = fold_number
+                        df_out_of_limits.to_csv(
+                            evaluation_table_path(METRICS_DIR, 'prediction_limits', fold_suffix), index=False)
+                        df_out_of_limits['Fold'] = fold_idx
 
                         aggregated_results_performance.append(df_metrics_performance)
                         aggregated_results_number_of_points.append(df_number_of_points)
                         aggregated_results_out_of_range.append(df_out_of_limits)
 
                         print()
-                        print(f'Aggregated metrics for fold {fold_number} done.')
-                        fold_number += 1
+                        print(f'Aggregated metrics for fold {fold_idx} done.')
 
                     print()
                     print('Calculating aggregated metrics across folds (Metric-Then-Aggregate)...')
                     if n_folds_to_train == 1:
                         print('NOTE: only one fold was trained (hold-out mode); standard deviations will be NaN.')
 
+                    # '_per_fold': fold tables stacked (not aggregated); '_metric_then_aggregate': mean and std
+                    # across folds; '_metric_then_aggregate_report': the same as "mean ± std" text.
                     df_metrics_performance_agg = pd.concat(aggregated_results_performance, ignore_index=True)
-                    df_metrics_performance_agg.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                            f'metrics_performance_{base_name}_ALL_metric_then_aggregate.csv'),
-                                                               index=False)
+                    df_metrics_performance_agg.round(2).to_csv(
+                        evaluation_table_path(METRICS_DIR, 'performance_by_range', '_per_fold'), index=False)
                     df_metrics_performance_agg = df_metrics_performance_agg.drop(columns=['Fold'])
                     df_metrics_performance_agg_flat, df_metrics_performance_agg_report = fold_results_aggregation(
                         df_metrics_performance_agg)
-                    df_metrics_performance_agg_flat.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                                 f'metrics_performance_{base_name}_metric_then_aggregate_flat.csv'),
-                                                                    index=False)
-                    df_metrics_performance_agg_report.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                                   f'metrics_performance_{base_name}_metric_then_aggregate_report.csv'),
-                                                                      index=False)
+                    df_metrics_performance_agg_flat.round(2).to_csv(
+                        evaluation_table_path(METRICS_DIR, 'performance_by_range', '_metric_then_aggregate'),
+                        index=False)
+                    df_metrics_performance_agg_report.round(2).to_csv(
+                        evaluation_table_path(METRICS_DIR, 'performance_by_range', '_metric_then_aggregate_report'),
+                        index=False)
 
                     df_number_of_points_agg = pd.concat(aggregated_results_number_of_points, ignore_index=True)
-                    df_number_of_points_agg.to_csv(os.path.join(METRICS_DIR,
-                                                                f'number_of_points_by_zones_{base_name}_ALL_metric_then_aggregate.csv'),
-                                                   index=False)
+                    df_number_of_points_agg.to_csv(
+                        evaluation_table_path(METRICS_DIR, 'ceg_zone_counts', '_per_fold'), index=False)
                     df_number_of_points_agg = df_number_of_points_agg.drop(columns=['Fold'])
                     df_number_of_points_agg_flat, df_number_of_points_report = fold_results_aggregation(
                         df_number_of_points_agg)
-                    df_number_of_points_agg_flat.to_csv(os.path.join(METRICS_DIR,
-                                                                     f'number_of_points_by_zones_{base_name}_metric_then_aggregate_flat.csv'),
-                                                        index=False)
-                    df_number_of_points_report.to_csv(os.path.join(METRICS_DIR,
-                                                                   f'number_of_points_by_zones_{base_name}_metric_then_aggregate_report.csv'),
-                                                      index=False)
+                    df_number_of_points_agg_flat.to_csv(
+                        evaluation_table_path(METRICS_DIR, 'ceg_zone_counts', '_metric_then_aggregate'), index=False)
+                    df_number_of_points_report.to_csv(
+                        evaluation_table_path(METRICS_DIR, 'ceg_zone_counts', '_metric_then_aggregate_report'),
+                        index=False)
 
                     df_out_of_range_agg = pd.concat(aggregated_results_out_of_range, ignore_index=True)
-                    df_out_of_range_agg.to_csv(os.path.join(METRICS_DIR,
-                                                            f'predictions_out_of_limits_{base_name}_ALL_metric_then_aggregate.csv'),
-                                               index=False)
+                    df_out_of_range_agg.to_csv(
+                        evaluation_table_path(METRICS_DIR, 'prediction_limits', '_per_fold'), index=False)
                     df_out_of_range_agg = df_out_of_range_agg.drop(columns=['Fold'])
                     df_out_of_range_agg_flat, df_out_of_range_report = fold_results_aggregation(df_out_of_range_agg)
-                    df_out_of_range_agg_flat.to_csv(os.path.join(METRICS_DIR,
-                                                                 f'predictions_out_of_limits_{base_name}_metric_then_aggregate_flat.csv'),
-                                                    index=False)
-                    df_out_of_range_report.to_csv(os.path.join(METRICS_DIR,
-                                                               f'predictions_out_of_limits_{base_name}_metric_then_aggregate_report.csv'),
-                                                  index=False)
+                    df_out_of_range_agg_flat.to_csv(
+                        evaluation_table_path(METRICS_DIR, 'prediction_limits', '_metric_then_aggregate'), index=False)
+                    df_out_of_range_report.to_csv(
+                        evaluation_table_path(METRICS_DIR, 'prediction_limits', '_metric_then_aggregate_report'),
+                        index=False)
 
                     print('Aggregated metrics across folds (Metric-Then-Aggregate) calculated and saved.')
                     print()
@@ -861,28 +900,25 @@ try:
                     print('Calculating aggregated metrics across folds (Aggregate-Then-Metric)...')
 
                     df_all_folds = pd.concat(aggregated_results, ignore_index=True)
-                    df_all_folds.to_parquet(os.path.join(PRED_DIR,
-                                                         f'df_test_results_vectors_{base_name}_ALL.parquet'))
+                    df_all_folds.to_parquet(os.path.join(PRED_DIR, 'predictions.parquet'))
                     print(f'\nAggregated all {n_folds_to_train} folds. Total rows: {len(df_all_folds)}')
 
                     df_metrics_performance, df_number_of_points, df_out_of_limits = test_by_range(df_all_folds,
-                                                                                                  f'_{base_name}_ALL',
+                                                                                                  figure_name='ceg',
                                                                                                   show_plot=True,
                                                                                                   plot_dir=FIGURES_DIR,
                                                                                                   minimum_sensor_reading=minimum_sensor_reading,
                                                                                                   maximum_sensor_reading=maximum_sensor_reading)
-                    df_metrics_performance.round(2).to_csv(os.path.join(METRICS_DIR,
-                                                                        f'metrics_performance_{base_name}_ALL_agregate_then_metric.csv'),
-                                                           index=False)
-                    df_number_of_points.to_csv(os.path.join(METRICS_DIR,
-                                                            f'number_of_points_by_zones_{base_name}_ALL_agregate_then_metric.csv'),
-                                               index=False)
-                    df_out_of_limits.to_csv(os.path.join(METRICS_DIR,
-                                                         f'predictions_out_of_limits_{base_name}_ALL_agregate_then_metric.csv'),
-                                            index=False)
+                    df_metrics_performance.round(2).to_csv(
+                        evaluation_table_path(METRICS_DIR, 'performance_by_range', '_aggregate_then_metric'),
+                        index=False)
+                    df_number_of_points.to_csv(
+                        evaluation_table_path(METRICS_DIR, 'ceg_zone_counts', '_aggregate_then_metric'), index=False)
+                    df_out_of_limits.to_csv(
+                        evaluation_table_path(METRICS_DIR, 'prediction_limits', '_aggregate_then_metric'), index=False)
                     print('Metrics for all folds calculated and saved.')
 
-                    write_experiment_readme(EXP_DIR, base_name, loss_function_name, current_algorithm, current_PH,
+                    write_experiment_readme(EXP_DIR, loss_function_name, current_algorithm, current_PH,
                                             current_historic, n_folds_to_train)
                     print(f"Main README.md created at: {os.path.join(EXP_DIR, 'README.md')}")
 
@@ -901,7 +937,7 @@ try:
                         "total_duration_seconds": round(duration.total_seconds(), 3)
                     }
 
-                    timing_json_path = os.path.join(EXP_DIR, "experiment_timing.json")
+                    timing_json_path = os.path.join(EXP_DIR, "timing.json")
                     with open(timing_json_path, "w", encoding="utf-8") as f:
                         json.dump(timing_payload, f, indent=4)
 

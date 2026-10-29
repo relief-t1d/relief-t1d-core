@@ -165,7 +165,7 @@ def build_single_dataset(
             val_wins = sum(patient_window_counts[pid] for pid in fold['val'])
             test_wins = sum(patient_window_counts[pid] for pid in fold['test'])
 
-            print(f"\n  ---- Fold {i + 1}: -----")
+            print(f"\n  ---- Fold {i} (column 'fold{i}'): -----")
             print("  -- Totals --")
             print(f"    Train: {len(fold['train'])} patients. Total windows: {train_wins}")
             print(f"    Val:   {len(fold['val'])} patients. Total windows: {val_wins}")
