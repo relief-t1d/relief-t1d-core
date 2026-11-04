@@ -139,7 +139,6 @@ from tensorflow import keras
 import time
 import datetime
 import platform
-import socket
 import json
 import psutil
 import subprocess
@@ -264,7 +263,6 @@ def print_system_info(experiment_start_time):
     print(f"Experiment Start Time: {experiment_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("\n🖥️  System & Hardware")
     print("-----------------------------------")
-    print(f"Hostname         : {socket.gethostname()}")
     print(f"OS               : {platform.system()} {platform.release()} ({platform.version()})")
     print(f"Architecture     : {platform.machine()}")
     print(f"CPU              : {platform.processor()}")
@@ -281,7 +279,6 @@ def print_system_info(experiment_start_time):
     print("\n🐍 Python & Libraries")
     print("-----------------------------------")
     print(f"Python Version   : {platform.python_version()}")
-    print(f"Executable Path  : {sys.executable}")
     print(f"TensorFlow       : {tf.__version__}")
     print("\n🧠 GPU (via TensorFlow)")
     print("-----------------------------------")
@@ -535,6 +532,7 @@ def write_run_config(output_dirs: list, run_id: str, history_len: int, ph: int, 
             "early_stopping_patience": patience,
         },
         "environment": {
+            "os": f"{platform.system()} {platform.release()}",
             "python": platform.python_version(),
             "tensorflow": tf.__version__,
             "keras": getattr(keras, "__version__", "N/A"),
@@ -577,8 +575,9 @@ def write_best_epoch_json(artifact_paths: dict, context: dict) -> None:
 
     Args:
         artifact_paths (dict): Model artifact paths returned by `model_artifact_paths`.
-        context (dict): Identification of the model (model type, fold, loss, algorithm, H, PH, run ID).
-            It is stored in the file because the generic file name does not identify the model.
+        context (dict): Identification of the model within its experiment (run ID, model type and fold). The
+            configuration of the experiment is in `run_config.json`, which is stored next to this file both in
+            the experiment directory and in the central models hub.
     """
     try:
         df_hist = pd.read_csv(artifact_paths["history"])
@@ -589,9 +588,10 @@ def write_best_epoch_json(artifact_paths: dict, context: dict) -> None:
             "epoch_idx": best_idx,
             "epoch_count": int(df_hist.shape[0]),
             "metrics": df_hist.iloc[best_idx].to_dict(),
+            # File names only: the weights are stored next to this file (experiment directory and hub)
             "artifacts": {
-                "weights_path": os.path.abspath(artifact_paths["weights"]),
-                "history_csv_path": os.path.abspath(artifact_paths["history"])
+                "weights_file": os.path.basename(artifact_paths["weights"]),
+                "history_file": os.path.basename(artifact_paths["history"])
             },
             "context": context,
             "created_at": datetime.datetime.now().isoformat()
@@ -599,19 +599,35 @@ def write_best_epoch_json(artifact_paths: dict, context: dict) -> None:
         with open(artifact_paths["best_epoch"], "w", encoding="utf-8") as f:
             json.dump(best_payload, f, indent=2)
     except Exception as e:
-        print(f"WARNING: could not write {artifact_paths['best_epoch']}: {e}")
+        print(f"WARNING: could not write {os.path.basename(artifact_paths['best_epoch'])}: {e}")
 
 
 # ----------------------- Per-fold JSON/MD writers -----------------------
-def write_fold_json_and_md(exp_dir, loss_name, algo, ph, fold_idx, fold_started_at, train_sec, train_hms, pred_sec,
-                           pred_hms, artifact_paths, preds_parquet_path, history_len, do_cv, min_sensor, max_sensor,
-                           data_file_path, data_counts):
+def write_fold_json_and_md(exp_dir, fold_idx, fold_started_at, train_sec, train_hms, pred_sec, pred_hms,
+                           artifact_paths, preds_parquet_path, data_counts):
+    """
+    Writes the summary of one fold as JSON (`summaries/`) and Markdown (`readmes/`).
+
+    Only fold-specific information is stored (split counts, timings and artifacts, with paths relative to the
+    experiment directory). The configuration of the experiment is in `run_config.json`.
+
+    Args:
+        exp_dir (str): Experiment directory.
+        fold_idx (int): 0-based fold index.
+        fold_started_at (datetime.datetime): Start time of the fold.
+        train_sec (float): Training time in seconds.
+        train_hms (datetime.timedelta): Training time.
+        pred_sec (float): Prediction time in seconds.
+        pred_hms (datetime.timedelta): Prediction time.
+        artifact_paths (dict): Model artifact paths returned by `model_artifact_paths`.
+        preds_parquet_path (str): Path of the test predictions of the fold.
+        data_counts (dict): Patient and window counts per split.
+    """
     payload = {
-        "experiment": {"loss": loss_name, "algorithm": algo, "prediction_horizon": ph, "fold": fold_idx,
-                       "history_length": history_len, "cross_validation": do_cv,
-                       "sensor_limits": {"min": min_sensor, "max": max_sensor},
-                       "started_at": fold_started_at.isoformat(), "run_id": GLOBAL_RUN_ID},
-        "data": {"file": os.path.abspath(data_file_path), "counts": data_counts},
+        "run_id": GLOBAL_RUN_ID,
+        "fold": fold_idx,
+        "started_at": fold_started_at.isoformat(),
+        "data": {"counts": data_counts},
         "timing": {"train_seconds": round(train_sec, 3), "train_elapsed": str(train_hms),
                    "predict_seconds": round(pred_sec, 3), "predict_elapsed": str(pred_hms)},
         "artifacts": {
@@ -619,9 +635,7 @@ def write_fold_json_and_md(exp_dir, loss_name, algo, ph, fold_idx, fold_started_
             "best_epoch_json_path": artifact_paths["best_epoch"], "tensorboard_dir": artifact_paths["tensorboard"],
             "predictions_parquet_path": preds_parquet_path, "training_plot_path": artifact_paths["loss_plot"]
         },
-        "git": get_git_info(),
-        "system": {"hostname": socket.gethostname(), "os": f"{platform.system()} {platform.release()}",
-                   "python": platform.python_version(), "tensorflow": tf.__version__}
+        "git": get_git_info()
     }
 
     for key, val in payload["artifacts"].items():
@@ -633,8 +647,8 @@ def write_fold_json_and_md(exp_dir, loss_name, algo, ph, fold_idx, fold_started_
 
     md_name = os.path.join(exp_dir, "readmes", f"readme{artifact_suffix(fold_idx)}.md")
     with open(md_name, "w", encoding="utf-8") as f:
-        f.write(f"# Fold {fold_idx} Summary for {loss_name}/{algo}/H={history_len}/PH={ph}\n\n")
-        f.write(f"**Data File**: `{os.path.abspath(data_file_path)}`\n\n")
+        f.write(f"# Fold {fold_idx} Summary\n\n")
+        f.write(f"Experiment configuration: `../{RUN_CONFIG_FILE_NAME}`\n\n")
         f.write("| Split | Patient Count | Window Count | % Patients | % Windows |\n")
         f.write("|-------|---------------|--------------|------------|-----------|\n")
         for split in ["train", "val", "test"]:
@@ -649,7 +663,7 @@ def write_fold_json_and_md(exp_dir, loss_name, algo, ph, fold_idx, fold_started_
 
 # ----------------------- Main README writer -----------------------
 def write_experiment_readme(exp_dir, loss_name, algo, ph, history_len, n_folds):
-    exp_name, git_info = os.path.basename(exp_dir), get_git_info()
+    exp_name = os.path.basename(exp_dir)
 
     lines = [f"# Experiment Summary: `{exp_name}`\n",
              f"- **Run ID**: `{GLOBAL_RUN_ID}`", f"- **Date**: `{RUN_TS.strftime('%Y-%m-%d %H:%M:%S')}`\n",
@@ -764,7 +778,7 @@ try:
 
                     write_run_config([EXP_DIR, CENTRAL_EXP_MODELS_DIR], GLOBAL_RUN_ID, current_historic, current_PH,
                                      current_algorithm, loss_function_name, data_file_path, dataset_generated)
-                    print(f"Run configuration saved at: {os.path.join(EXP_DIR, RUN_CONFIG_FILE_NAME)}\n")
+                    print(f"Run configuration saved: {RUN_CONFIG_FILE_NAME}\n")
 
                     MODELS_DIR = os.path.join(EXP_DIR, "models")
                     PRED_DIR = os.path.join(EXP_DIR, "results", "predictions")
@@ -783,7 +797,7 @@ try:
                         fold_paths = model_artifact_paths(MODELS_DIR, PLOTS_TRAIN_DIR, fold_idx)
 
                         print(f"\n---- Loading data for Fold {fold_idx} [{fold_idx + 1}/{n_folds_to_train}] "
-                              f"from: {data_file_path} ----")
+                              f"from: {os.path.basename(data_file_path)} ----")
                         df = pd.read_parquet(data_file_path)
 
                         df_train = df[df[f'fold{fold_idx}'] == 'train']
@@ -870,19 +884,13 @@ try:
                         get_train_plots_loss(hist, fold_paths["loss_plot"])
 
                         write_best_epoch_json(fold_paths, context={
-                            "model_type": "fold", "fold": fold_idx, "loss": loss_function_name,
-                            "algorithm": current_algorithm, "prediction_horizon": current_PH,
-                            "history_length": current_historic, "run_id": GLOBAL_RUN_ID
+                            "run_id": GLOBAL_RUN_ID, "model_type": "fold", "fold": fold_idx
                         })
 
                         write_fold_json_and_md(
-                            EXP_DIR, loss_function_name, current_algorithm, current_PH, fold_idx,
-                            fold_started_at, train_time, datetime.timedelta(seconds=train_time),
+                            EXP_DIR, fold_idx, fold_started_at, train_time, datetime.timedelta(seconds=train_time),
                             pred_time, datetime.timedelta(seconds=pred_time),
-                            artifact_paths=fold_paths, preds_parquet_path=preds_path,
-                            history_len=current_historic, do_cv=do_cross_validation,
-                            min_sensor=minimum_sensor_reading, max_sensor=maximum_sensor_reading,
-                            data_file_path=data_file_path, data_counts=data_counts
+                            artifact_paths=fold_paths, preds_parquet_path=preds_path, data_counts=data_counts
                         )
 
                         # Duplicate weights and best epoch metadata to the models repository
@@ -892,7 +900,7 @@ try:
                             if os.path.exists(fold_paths["best_epoch"]):
                                 shutil.copy(fold_paths["best_epoch"], CENTRAL_EXP_MODELS_DIR)
                             print(
-                                f"Successfully copied fold {fold_idx} model artifacts to central hub: {CENTRAL_EXP_MODELS_DIR}")
+                                f"Successfully copied fold {fold_idx} model artifacts to the central models hub")
                         except Exception as e:
                             print(f"WARNING: Could not copy model artifacts to central hub: {e}")
 
@@ -908,7 +916,7 @@ try:
                     print(f"====================================================================")
 
                     # 1. Load data specifically for the production model
-                    print(f"Loading data for Production Model from: {data_file_path}")
+                    print(f"Loading data for Production Model from: {os.path.basename(data_file_path)}")
                     df_prod = pd.read_parquet(data_file_path)
 
                     df_prod_train = df_prod[df_prod['production_split'] == 'train'].reset_index(drop=True)[
@@ -949,9 +957,7 @@ try:
 
                     # 5. Extract best epoch metrics and save metadata
                     write_best_epoch_json(prod_paths, context={
-                        "model_type": "production", "fold": None, "loss": loss_function_name,
-                        "algorithm": current_algorithm, "prediction_horizon": current_PH,
-                        "history_length": current_historic, "run_id": GLOBAL_RUN_ID
+                        "run_id": GLOBAL_RUN_ID, "model_type": "production", "fold": None
                     })
 
                     # 6. Copy production artifacts to the central model hub
@@ -961,7 +967,7 @@ try:
                         if os.path.exists(prod_paths["best_epoch"]):
                             shutil.copy(prod_paths["best_epoch"], CENTRAL_EXP_MODELS_DIR)
                         print(
-                            f"Successfully copied PRODUCTION model artifacts to central hub: {CENTRAL_EXP_MODELS_DIR}")
+                            f"Successfully copied PRODUCTION model artifacts to the central models hub")
                     except Exception as e:
                         print(f"WARNING: Could not copy PRODUCTION model artifacts to central hub: {e}")
 
@@ -1072,17 +1078,14 @@ try:
 
                     write_experiment_readme(EXP_DIR, loss_function_name, current_algorithm, current_PH,
                                             current_historic, n_folds_to_train)
-                    print(f"Main README.md created at: {os.path.join(EXP_DIR, 'README.md')}")
+                    print("Main README.md created.")
 
                     experiment_end_time = datetime.datetime.now()
                     duration = experiment_end_time - RUN_TS
 
+                    # Timing only: the configuration of the experiment is in run_config.json
                     timing_payload = {
                         "run_id": GLOBAL_RUN_ID,
-                        "algorithm": current_algorithm,
-                        "loss_function": loss_function_name,
-                        "history_length": current_historic,
-                        "prediction_horizon": current_PH,
                         "start_time": RUN_TS.isoformat(),
                         "end_time": experiment_end_time.isoformat(),
                         "total_duration_str": str(duration),
@@ -1093,7 +1096,7 @@ try:
                     with open(timing_json_path, "w", encoding="utf-8") as f:
                         json.dump(timing_payload, f, indent=4)
 
-                    print(f"Timing JSON saved at: {timing_json_path}")
+                    print(f"Timing saved: {os.path.basename(timing_json_path)}")
 
                     print(f"================\nFinished Experiment: {os.path.basename(EXP_DIR)}")
                     print(f"Experiment End Time: {experiment_end_time.strftime('%Y-%m-%d %H:%M:%S')}")
