@@ -1,8 +1,8 @@
-# <img src="https://projects.ugr.es/relief-t1d/assets/img/project/Logo.png" width="85" alt="RELIEF-T1D Logo" align="center" /> &nbsp;&nbsp; RELIEF-T1D Core
+# <img src="https://digitalhealthlab.ugr.es/relief-t1d/assets/img/project/Logo.png" width="85" alt="RELIEF-T1D Logo" align="center" /> &nbsp;&nbsp; RELIEF-T1D Core
 
 **RELIEF-T1D: towards Clinically Reliable AI Prediction of Adverse Glycemic Events for Improved Quality of Life in Type 1 Diabetes**
 
-[![Website](https://img.shields.io/badge/Website-projects.ugr.es%2Frelief--t1d-005691?style=flat-square&logo=googlechrome&logoColor=white)](https://projects.ugr.es/relief-t1d/index.html)
+[![Website](https://img.shields.io/badge/Website-digitalhealthlab.ugr.es%2Frelief--t1d-005691?style=flat-square&logo=googlechrome&logoColor=white)](https://digitalhealthlab.ugr.es/relief-t1d/index.html)
 
 ---
 
@@ -10,7 +10,7 @@
 
 The `relief-t1d-core` repository provides the source code and data processing pipelines for Continuous Glucose Monitoring (CGM) time series within the **RELIEF-T1D** project. It contains reusable and packageable software logic designed to support reliable nocturnal glucose event prediction models.
 
-> **Further Information:** Visit the [RELIEF-T1D Website](https://projects.ugr.es/relief-t1d/index.html) for detailed project scope, updates, and research publications.
+> **Further Information:** Visit the [RELIEF-T1D Website](https://digitalhealthlab.ugr.es/relief-t1d/index.html) for detailed project scope, updates, and research publications.
 
 ---
 
@@ -80,4 +80,4 @@ Serves as an environment configuration template to be duplicated as .env in loca
 
 Grant PID2023-148188OA-I00 funded by: MICIU/AEI /10.13039/501100011033 and by ERDF, EU.
 
-<img src="https://projects.ugr.es/relief-t1d/assets/img/project/MICIU+Cofinanciado+AEI.jpg" alt="Institutional Funding Logos" width="400" />
+<img src="https://digitalhealthlab.ugr.es/relief-t1d/assets/img/project/MICIU+Cofinanciado+AEI.jpg" alt="Institutional Funding Logos" width="400" />
